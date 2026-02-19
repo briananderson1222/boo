@@ -63,6 +63,7 @@ The agent has access to all its configured tools and can delegate to subagents. 
 | `boo next "<cron>"` | Preview next N occurrences of a cron expression |
 | `boo logs <name\|id>` | Show run history |
 | `boo logs <name\|id> --output` | Print the clean response from the most recent run |
+| `boo resume [name\|id]` | Resume an interactive kiro-cli session to follow up on a previous run |
 | `boo install` | Register as auto-start service |
 | `boo uninstall` | Remove auto-start service |
 
@@ -77,7 +78,7 @@ boo add --name <NAME> --cron <CRON> --prompt <PROMPT> [OPTIONS]
 | `--name` | Job name (must be unique) | required |
 | `--cron` | Cron expression (5-field) | required |
 | `--prompt` | Prompt text sent to kiro-cli | required |
-| `--dir` | Working directory for kiro-cli | `.` |
+| `--dir` | Working directory for kiro-cli | `~/.boo/workspace/<name>` |
 | `--agent` | Kiro agent to use | default agent |
 | `--timeout` | Max seconds before killing the job | 300 |
 | `--timezone` | IANA timezone for cron evaluation | UTC |
@@ -96,6 +97,38 @@ Standard 5-field cron syntax: `minute hour day-of-month month day-of-week`
 ```
 
 Use `boo next "<cron>"` to preview when a cron expression will fire.
+
+### Resuming Sessions
+
+Every job run (both scheduled and manual) creates a kiro-cli session that can be resumed for follow-up:
+
+```bash
+boo resume wrap-up-day    # opens session picker scoped to that job
+boo resume                # opens picker for default workspace
+```
+
+Each job runs in its own directory (`~/.boo/workspace/<job-name>/`), so sessions are isolated per job.
+
+### Manual Runs
+
+`boo run <job>` executes a job immediately and saves the same log files and run records as the daemon. Manual runs are tagged with `manual` type in `boo logs`:
+
+```
+Fired At             OK       Duration   Missed   Type
+--------------------------------------------------------
+2026-02-19 16:34:16  yes      52.35s     1        cron
+2026-02-19 23:45:03  yes      151.15s    0        manual
+```
+
+### Removing Jobs
+
+`boo remove` prompts to delete run history. Use flags to skip the prompt:
+
+```bash
+boo remove my-job                # prompts: "Delete logs too? [y/N]"
+boo remove my-job --delete-logs  # deletes job + all logs
+boo remove my-job --keep-logs    # deletes job, keeps logs
+```
 
 ## How It Works
 

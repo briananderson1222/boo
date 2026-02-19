@@ -32,8 +32,8 @@ enum Commands {
         cron: String,
         #[arg(long)]
         prompt: String,
-        #[arg(long, default_value = ".")]
-        dir: PathBuf,
+        #[arg(long)]
+        dir: Option<PathBuf>,
         #[arg(long)]
         agent: Option<String>,
         #[arg(long)]
@@ -76,6 +76,11 @@ enum Commands {
         #[arg(long)]
         output: bool,
     },
+    /// Resume an interactive kiro-cli session (to follow up on a previous run)
+    Resume {
+        /// Job name/ID to scope the session picker to that job's directory and agent
+        target: Option<String>,
+    },
     /// Install boo as auto-start service
     Install,
     /// Remove boo from auto-start
@@ -110,6 +115,7 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
         Commands::Run { target } => cmd_run(&target).await,
         Commands::Next { cron_expr, count } => cmd_next(&cron_expr, count),
         Commands::Logs { target, count, output } => cmd_logs(&target, count, output),
+        Commands::Resume { target } => cmd_resume(target.as_deref()),
         Commands::Install => cmd_install(),
         Commands::Uninstall => cmd_uninstall(),
         Commands::_Notify { summary, body } => {
@@ -196,10 +202,17 @@ async fn cmd_run(target: &str) -> boo::error::Result<()> {
 
 // --- Sync commands (no async needed) ---
 
-fn cmd_add(name: String, cron: String, prompt: String, dir: PathBuf,
+fn cmd_add(name: String, cron: String, prompt: String, dir: Option<PathBuf>,
            agent: Option<String>, timeout: Option<u64>, timezone: Option<String>,
 ) -> boo::error::Result<()> {
     cron_eval::next_occurrence(&cron, Utc::now())?;
+
+    // Default working directory: ~/.boo/workspace/<job-name>
+    let dir = dir.unwrap_or_else(|| {
+        let ws = boo::config::boo_dir().join("workspace").join(&name);
+        let _ = std::fs::create_dir_all(&ws);
+        ws
+    });
 
     // Validate working directory exists
     if !dir.exists() {
@@ -261,8 +274,8 @@ fn cmd_list() -> boo::error::Result<()> {
         println!("No jobs configured");
         return Ok(());
     }
-    println!("{:<8} {:<20} {:<15} {:<8} {:<20}", "ID", "Name", "Cron", "Enabled", "Next Fire");
-    println!("{}", "-".repeat(80));
+    println!("{:<8} {:<20} {:<15} {:<8} {:<20} Dir", "ID", "Name", "Cron", "Enabled", "Next Fire");
+    println!("{}", "-".repeat(100));
     for job in jobs {
         let id_short = &job.id.to_string()[..8];
         let enabled = if job.enabled { "yes" } else { "no" };
@@ -273,7 +286,9 @@ fn cmd_list() -> boo::error::Result<()> {
         } else {
             "disabled".into()
         };
-        println!("{:<8} {:<20} {:<15} {:<8} {:<20}", id_short, job.name, job.cron_expr, enabled, next);
+        let dir = job.working_dir.to_string_lossy();
+        let dir_short = dir.replace(&dirs::home_dir().map(|h| h.to_string_lossy().to_string()).unwrap_or_default(), "~");
+        println!("{:<8} {:<20} {:<15} {:<8} {:<20} {}", id_short, job.name, job.cron_expr, enabled, next, dir_short);
     }
     Ok(())
 }
@@ -355,6 +370,32 @@ fn cmd_logs(target: &str, count: usize, output: bool) -> boo::error::Result<()> 
             format!("{:.2}s", r.duration_secs),
             r.missed_count,
             if r.manual { "manual" } else { "cron" });
+    }
+    Ok(())
+}
+
+fn cmd_resume(target: Option<&str>) -> boo::error::Result<()> {
+    let config = Config::load();
+    let (dir, agent) = if let Some(target) = target {
+        let store = JobStore::new()?;
+        let job = resolve_job(&store, target)?;
+        (job.working_dir.clone(), job.agent.clone())
+    } else {
+        (boo::config::boo_dir().join("workspace"), None)
+    };
+
+    println!("Opening session picker (dir: {})", dir.display());
+
+    let mut cmd = std::process::Command::new(&config.kiro_cli_path);
+    cmd.args(["chat", "--resume-picker"]);
+    if let Some(ref agent) = agent {
+        cmd.args(["--agent", agent]);
+    }
+    cmd.current_dir(&dir);
+
+    let status = cmd.status().map_err(boo::error::BooError::Io)?;
+    if !status.success() {
+        return Err(boo::error::BooError::Other("kiro-cli session picker exited with error".into()));
     }
     Ok(())
 }

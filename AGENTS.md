@@ -43,7 +43,10 @@ tests/
 - **Clock trait**: Enables deterministic testing with MockClock; trait requires `Clone + Send + Sync`
 - **Coalesced missed runs**: On wake from sleep, overdue jobs fire once with `missed_count` metadata (capped at 1000 iterations)
 - **Notification via child process**: macOS suppresses notifications from backgrounded processes. The daemon spawns `boo internal-notify <summary> <body>` as a child process which delivers the notification from a fresh process context. Falls back to direct notify-rust call if the binary can't be found
-- **Duplicate job name prevention**: `boo add` rejects duplicate names to ensure name-based resolution is unambiguous
+- **Per-job workspace directories**: Default working directory is `~/.boo/workspace/<job-name>/`, giving each job isolated kiro-cli sessions. Code-specific jobs can override with `--dir`
+- **Session resume**: `boo resume <job>` opens kiro-cli's session picker scoped to that job's workspace directory and agent
+- **Manual run tracking**: `boo run` saves the same log/response/record as daemon runs, tagged with `manual: true` in RunRecord
+- **Remove with cleanup**: `boo remove` prompts for log deletion, with `--delete-logs`/`--keep-logs` flags to skip the prompt
 - **Working directory validation**: `boo add` verifies the directory exists before creating the job
 - **PID alive check**: `boo status` uses `kill(pid, 0)` on Unix to verify the daemon is actually running, not just that a stale PID file exists
 
