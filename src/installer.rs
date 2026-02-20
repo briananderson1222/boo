@@ -108,7 +108,6 @@ fn uninstall_macos() -> Result<()> {
     let plist_path = home.join("Library/LaunchAgents/com.boo.scheduler.plist");
     
     if plist_path.exists() {
-        // Unload the service
         let _ = Command::new("launchctl")
             .args(["unload", &plist_path.to_string_lossy()])
             .output();

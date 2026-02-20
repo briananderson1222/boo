@@ -2,13 +2,13 @@
 
 ## Project: Boo
 
-Cross-platform Rust scheduler daemon that fires kiro-cli prompts on cron schedules with heartbeat-based missed schedule recovery.
+Cross-platform Rust scheduler daemon that fires kiro-cli prompts on cron/at/every schedules with heartbeat-based missed schedule recovery.
 
 ## Goals
 
-1. **Reliable scheduled AI tasks** — cron-based scheduling that survives sleep/wake, crashes, and reboots
+1. **Reliable scheduled AI tasks** — cron, one-shot, and interval scheduling that survives sleep/wake, crashes, and reboots
 2. **Cross-platform** — macOS, Linux, Windows from a single Rust binary
-3. **Heartbeat pattern** — inspired by OpenClaw's approach: periodic tick checks overdue jobs, coalesces missed runs
+3. **Heartbeat pattern** — inspired by OpenClaw: periodic tick checks overdue jobs, coalesces missed runs
 4. **Minimal footprint** — single ~2MB binary, no runtime dependencies, no GUI framework
 5. **Developer-friendly** — CLI-first management, JSON persistence, property-based testing
 
@@ -16,15 +16,15 @@ Cross-platform Rust scheduler daemon that fires kiro-cli prompts on cron schedul
 
 ```
 src/
-├── main.rs           # CLI entry point (clap) — 12 user commands + hidden internal-notify
-├── scheduler.rs      # Heartbeat loop, job spawning, graceful shutdown
+├── main.rs           # CLI entry point (clap) — 13 user commands + hidden internal-notify
+├── scheduler.rs      # Heartbeat loop, job spawning, retry loop, delete-after-run, batched start notifications
 ├── store.rs          # Atomic JSON persistence with file locking (single lock scope per mutation)
 ├── executor.rs       # Subprocess spawning, stdin piping, concurrent stdout/stderr capture, timeout + kill
-├── cron_eval.rs      # Cron parsing (croner), overdue detection, missed count (capped at 1000)
-├── job.rs            # Job + RunRecord models
+├── cron_eval.rs      # Schedule evaluation (cron/at/every), overdue detection, missed count
+├── job.rs            # Job + RunRecord models with schedule types and retry/notification fields
 ├── config.rs         # Global config (~/.boo/config.json), warns on malformed config
 ├── clock.rs          # Clock trait with Clone bound (SystemClock + MockClock for testing)
-├── notifier.rs       # Desktop notifications via child process (macOS daemon workaround)
+├── notifier.rs       # Desktop notifications via child process, start/stop split, click-to-open artifact
 ├── installer.rs      # Platform-specific auto-start (launchd/systemd/Windows)
 ├── error.rs          # Error types
 └── lib.rs            # Module re-exports
@@ -35,28 +35,33 @@ tests/
 
 ## Key Design Decisions
 
-- **Atomic file operations**: All store mutations use a single file lock scope with tmp+rename to prevent corruption on crash or concurrent access
-- **Stdin piping**: Prompts sent via stdin, not CLI args (security — not visible in `ps aux`)
-- **Concurrent stdout/stderr capture**: `tokio::try_join!` reads both streams simultaneously to prevent pipe deadlock when kiro-cli writes large output
-- **Child process kill on timeout**: `child.kill().await` prevents orphan processes
-- **Separate stdout/stderr**: stdout = kiro-cli response, stderr = chrome/warnings. Response file (`.response`) contains ANSI-stripped stdout only
-- **Clock trait**: Enables deterministic testing with MockClock; trait requires `Clone + Send + Sync`
-- **Coalesced missed runs**: On wake from sleep, overdue jobs fire once with `missed_count` metadata (capped at 1000 iterations)
-- **Notification via child process**: macOS suppresses notifications from backgrounded processes. The daemon spawns `boo internal-notify <summary> <body>` as a child process which delivers the notification from a fresh process context. Falls back to direct notify-rust call if the binary can't be found
-- **Per-job workspace directories**: Default working directory is `~/.boo/workspace/<job-name>/`, giving each job isolated kiro-cli sessions. Code-specific jobs can override with `--dir`
-- **Session resume**: `boo resume <job>` opens kiro-cli's session picker scoped to that job's workspace directory and agent
-- **Manual run tracking**: `boo run` saves the same log/response/record as daemon runs, tagged with `manual: true` in RunRecord
-- **Remove with cleanup**: `boo remove` prompts for log deletion, with `--delete-logs`/`--keep-logs` flags to skip the prompt
-- **Working directory validation**: `boo add` verifies the directory exists before creating the job
-- **PID alive check**: `boo status` uses `kill(pid, 0)` on Unix to verify the daemon is actually running, not just that a stale PID file exists
+- **Three schedule types**: cron (recurring), at (one-shot), every (interval) — mutually exclusive, stored as optional fields for backward compat
+- **Atomic file operations**: All store mutations use a single file lock scope with tmp+rename
+- **Stdin piping**: Prompts sent via stdin, not CLI args (not visible in `ps aux`)
+- **Concurrent stdout/stderr capture**: `tokio::try_join!` prevents pipe deadlock
+- **Child process kill on timeout**: No orphan processes
+- **Separate stdout/stderr**: stdout = response, stderr = chrome. `.response` file is ANSI-stripped stdout
+- **Clock trait**: Enables deterministic testing with MockClock
+- **Coalesced missed runs**: Fire once with `missed_count` metadata (capped at 1000)
+- **Notification via child process**: macOS suppresses notifications from backgrounded processes. Daemon spawns `boo internal-notify` as child
+- **Clickable notifications**: `--open` arg on internal-notify opens artifact file via system handler
+- **Batched start notifications**: Multiple jobs firing in same tick get one grouped notification
+- **Retry with delay**: Configurable retry count and delay per job, each attempt logged
+- **Delete-after-run**: One-shot `--at` jobs auto-remove after success
+- **Per-job workspace directories**: `~/.boo/workspace/<name>/` isolates kiro-cli sessions per job
+- **Natural language --at parsing**: Falls back to kiro-cli with `--trust-tools=` for safe LLM parsing, always confirms
+- **BOO_NON_INTERACTIVE=1**: Env var set on spawned kiro-cli so agents can detect daemon context
+- **Duplicate job name prevention**: `boo add` rejects duplicates
+- **Working directory validation**: `boo add` verifies dir exists
+- **PID alive check**: `kill(pid, 0)` on Unix
 
 ## Testing Strategy
 
 - **proptest** for property-based testing (serialization roundtrips, cron evaluation invariants, store consistency)
 - **tempfile** for test isolation (no tests touch real `~/.boo`)
-- **assert_cmd** for CLI integration tests (full add→list→disable→enable→remove flow, cron preview, error cases)
-- **MockClock** for deterministic scheduler tests (overdue detection, skip non-overdue, skip disabled, shutdown)
-- **`echo` as kiro-cli substitute** in tests — config sets `kiro_cli_path = "echo"` so tests don't require kiro-cli
+- **assert_cmd** for CLI integration tests (schedule types, mutual exclusion, flags, duration parsing, full lifecycle)
+- **MockClock** for deterministic scheduler tests (overdue detection for cron/at/every, delete-after-run, skip disabled)
+- **`echo` as kiro-cli substitute** in tests
 
 ## Dependencies
 
@@ -69,7 +74,7 @@ tests/
 | `chrono` / `chrono-tz` | Time handling |
 | `uuid` | Job IDs |
 | `notify-rust` | Desktop notifications (cross-platform) |
-| `fs2` | File locking for concurrent access |
+| `fs2` | File locking |
 | `dirs` | Cross-platform config directories |
 | `libc` | PID alive check (Unix only) |
 | `thiserror` | Error type derivation |
@@ -78,7 +83,7 @@ Dev dependencies: `proptest`, `tempfile`, `assert_cmd`, `predicates`
 
 ## Conventions
 
-- Sync functions for CLI commands that don't need async (only `daemon` and `run` are async)
+- Sync functions for CLI commands that don't need async (only `daemon`, `run`, and `add` are async)
 - `impl Into<String>` for constructor ergonomics
 - All public store methods are atomic (single lock scope for read-modify-write)
 - Errors in spawned job tasks are caught with `eprintln!`, never crash the daemon

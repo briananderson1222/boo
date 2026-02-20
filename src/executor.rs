@@ -159,7 +159,11 @@ fn build_command(job: &Job, config: &Config) -> Command {
     if let Some(ref agent) = job.agent {
         cmd.args(["--agent", agent]);
     }
+    if let Some(ref model) = job.model {
+        cmd.args(["--model", model]);
+    }
     cmd.current_dir(&job.working_dir);
+    cmd.env("BOO_NON_INTERACTIVE", "1");
     cmd
 }
 
@@ -171,20 +175,10 @@ mod tests {
     use tempfile::tempdir;
 
     fn test_job() -> Job {
-        Job {
-            id: uuid::Uuid::new_v4(),
-            name: "test".into(),
-            cron_expr: "* * * * *".into(),
-            timezone: Some("UTC".into()),
-            prompt: "echo hello".into(),
-            working_dir: PathBuf::from("/tmp"),
-            agent: None,
-            enabled: true,
-            allow_overlap: false,
-            timeout_secs: Some(5),
-            last_run: None,
-            created_at: chrono::Utc::now(),
-        }
+        let mut job = Job::new("test", "* * * * *", "echo hello", PathBuf::from("/tmp"));
+        job.timezone = Some("UTC".into());
+        job.timeout_secs = Some(5);
+        job
     }
 
     fn test_config() -> Config {
