@@ -19,6 +19,10 @@ pub struct Config {
     /// Heartbeat interval in seconds
     #[serde(default = "default_heartbeat_secs")]
     pub heartbeat_secs: u64,
+
+    /// Terminal app for interactive sessions (e.g. "iTerm", "Ghostty", "Terminal")
+    #[serde(default)]
+    pub terminal: Option<String>,
 }
 
 fn default_kiro_path() -> String {
@@ -41,6 +45,7 @@ impl Default for Config {
             default_timeout_secs: default_timeout(),
             max_log_runs: default_max_log_runs(),
             heartbeat_secs: default_heartbeat_secs(),
+            terminal: None,
         }
     }
 }
@@ -107,6 +112,7 @@ mod tests {
             default_timeout_secs: 600,
             max_log_runs: 100,
             heartbeat_secs: 30,
+            terminal: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();

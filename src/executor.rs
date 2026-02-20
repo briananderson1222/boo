@@ -163,13 +163,14 @@ mod tests {
     }
 
     fn test_config() -> Config {
-        Config {
-            kiro_cli_path: "echo".into(),
-            default_timeout_secs: 5,
-            max_log_runs: 10,
-            heartbeat_secs: 60,
+            Config {
+                kiro_cli_path: "echo".into(),
+                default_timeout_secs: 5,
+                max_log_runs: 10,
+                heartbeat_secs: 60,
+                terminal: None,
+            }
         }
-    }
 
     #[test]
     fn test_strip_ansi() {

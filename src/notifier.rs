@@ -149,21 +149,60 @@ pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, working_dir:
     std::process::exit(0);
 }
 
-/// Launch kiro-cli in the job's working directory with the reply text as a follow-up prompt.
+/// Launch an interactive kiro-cli session in the user's terminal with the reply as the initial prompt.
 fn resume_with_prompt(working_dir: &str, prompt: &str) {
     let config = crate::config::Config::load();
-    let _ = std::process::Command::new(&config.kiro_cli_path)
-        .args(["chat", "--trust-all-tools"])
-        .current_dir(working_dir)
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .map(|mut child| {
-            use std::io::Write;
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(prompt.as_bytes());
+    let escaped_prompt = prompt.replace('\\', "\\\\").replace('"', "\\\"");
+
+    #[cfg(target_os = "macos")]
+    {
+        let terminal = config.terminal.as_deref().unwrap_or_else(|| {
+            for app in &["iTerm", "Ghostty", "Alacritty", "kitty", "WezTerm"] {
+                if std::path::Path::new(&format!("/Applications/{app}.app")).exists() {
+                    return app;
+                }
             }
-            child
+            "Terminal"
         });
+        if terminal == "Terminal" {
+            let cmd = format!("cd '{}' && {} chat --resume \"{}\"",
+                working_dir.replace('\'', "'\\''"), config.kiro_cli_path, escaped_prompt);
+            let script = format!("tell application \"Terminal\"\n\tactivate\n\tdo script \"{}\"\nend tell",
+                cmd.replace('\\', "\\\\").replace('"', "\\\""));
+            let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
+        } else {
+            let tmp = crate::config::boo_dir().join("reply.command");
+            let script = format!("#!/bin/sh\ncd '{}'\n{} chat --resume \"{}\"\nrm -f '{}'\n",
+                working_dir.replace('\'', "'\\''"),
+                config.kiro_cli_path,
+                escaped_prompt,
+                tmp.to_string_lossy().replace('\'', "'\\''"),
+            );
+            let _ = std::fs::write(&tmp, &script);
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
+            let _ = std::process::Command::new("open").args(["-a", terminal]).arg(&tmp).spawn();
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let cmd = format!("cd '{}' && {} chat --resume \"{}\"",
+            working_dir.replace('\'', "'\\''"), config.kiro_cli_path, escaped_prompt);
+        let terminals = [("x-terminal-emulator", vec!["-e"]), ("gnome-terminal", vec!["--"]), ("xterm", vec!["-e"])];
+        for (term, args) in &terminals {
+            let mut c = std::process::Command::new(term);
+            c.args(args).args(["sh", "-c", &cmd]);
+            if c.spawn().is_ok() { return; }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let cmd = format!("cd /d \"{}\" && {} chat --resume \"{}\"",
+            working_dir, config.kiro_cli_path, escaped_prompt);
+        let _ = std::process::Command::new("cmd").args(["/C", "start", "cmd", "/K", &cmd]).spawn();
+    }
 }
 
 /// Open a file with the system default handler.
