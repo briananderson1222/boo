@@ -18,26 +18,7 @@ pub struct ExecutionResult {
 
 /// Strip ANSI escape sequences from text.
 fn strip_ansi(s: &[u8]) -> String {
-    let text = String::from_utf8_lossy(s);
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Skip ESC [ ... (letter)
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                while let Some(&nc) = chars.peek() {
-                    chars.next();
-                    if nc.is_ascii_alphabetic() { break; }
-                }
-            }
-        } else if c == '\x07' {
-            // Skip BEL
-        } else {
-            out.push(c);
-        }
-    }
-    out.trim().to_string()
+    crate::strip_ansi(&String::from_utf8_lossy(s)).trim().to_string()
 }
 
 /// Execute a job by spawning kiro-cli. Captures stdout (response) and stderr (chrome) separately.

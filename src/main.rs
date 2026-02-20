@@ -538,7 +538,7 @@ async fn parse_at_time(input: &str) -> boo::error::Result<DateTime<Utc>> {
 
     let raw = String::from_utf8_lossy(&output.stdout);
     // Strip ANSI codes and find the timestamp
-    let cleaned = strip_ansi(&raw);
+    let cleaned = boo::strip_ansi(&raw);
     let timestamp = cleaned.lines()
         .filter_map(|line| {
             let l = line.trim().trim_start_matches('>').trim();
@@ -559,25 +559,6 @@ async fn parse_at_time(input: &str) -> boo::error::Result<DateTime<Utc>> {
     }
 
     Ok(timestamp)
-}
-
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                while let Some(&nc) = chars.peek() {
-                    chars.next();
-                    if nc.is_ascii_alphabetic() { break; }
-                }
-            }
-        } else if c != '\x07' {
-            out.push(c);
-        }
-    }
-    out
 }
 
 fn is_daemon_running(pid_path: &std::path::Path) -> bool {

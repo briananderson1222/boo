@@ -57,10 +57,6 @@ fn spawn_notify(summary: &str, body: &str, open: Option<&str>) {
 
 /// Called by the hidden `internal-notify` subcommand.
 pub async fn send_and_exit(summary: &str, body: &str, open: Option<&str>) {
-    send_impl(summary, body, open).await;
-}
-
-async fn send_impl(summary: &str, body: &str, open: Option<&str>) {
     use user_notify::NotificationBuilder;
 
     let manager = user_notify::get_notification_manager("com.boo.scheduler".into(), None);
@@ -87,7 +83,6 @@ async fn send_impl(summary: &str, body: &str, open: Option<&str>) {
         eprintln!("Notification error: {e}");
     }
 
-    // Open artifact directly (click-to-open requires MainThreadMarker, future improvement)
     if let Some(path) = open {
         open_file(path);
     }
