@@ -149,10 +149,17 @@ pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, working_dir:
     std::process::exit(0);
 }
 
-/// Launch an interactive kiro-cli session in the user's terminal with the reply as the initial prompt.
+/// Open a terminal and run `boo resume` with the reply prompt.
 fn resume_with_prompt(working_dir: &str, prompt: &str) {
     let config = crate::config::Config::load();
-    let escaped_prompt = prompt.replace('\\', "\\\\").replace('"', "\\\"");
+    let boo_bin = std::env::current_exe().unwrap_or_else(|_| "boo".into());
+    let boo = boo_bin.to_string_lossy();
+
+    // Find the job name from working_dir (last path component)
+    let job_name = std::path::Path::new(working_dir)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
 
     #[cfg(target_os = "macos")]
     {
@@ -164,31 +171,27 @@ fn resume_with_prompt(working_dir: &str, prompt: &str) {
             }
             "Terminal"
         });
+        let tmp = crate::config::boo_dir().join("reply.command");
+        let script = format!("#!/bin/sh\nexec '{}' resume '{}' '{}'\n",
+            boo.replace('\'', "'\\''"),
+            job_name.replace('\'', "'\\''"),
+            prompt.replace('\'', "'\\''"),
+        );
+        let _ = std::fs::write(&tmp, &script);
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
         if terminal == "Terminal" {
-            let cmd = format!("cd '{}' && {} chat --resume \"{}\"",
-                working_dir.replace('\'', "'\\''"), config.kiro_cli_path, escaped_prompt);
-            let script = format!("tell application \"Terminal\"\n\tactivate\n\tdo script \"{}\"\nend tell",
-                cmd.replace('\\', "\\\\").replace('"', "\\\""));
+            let script = format!("tell application \"Terminal\"\n\tactivate\n\tdo script \"'{}'\"\nend tell",
+                tmp.to_string_lossy().replace('\'', "'\\''"));
             let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
         } else {
-            let tmp = crate::config::boo_dir().join("reply.command");
-            let script = format!("#!/bin/sh\ncd '{}'\n{} chat --resume \"{}\"\nrm -f '{}'\n",
-                working_dir.replace('\'', "'\\''"),
-                config.kiro_cli_path,
-                escaped_prompt,
-                tmp.to_string_lossy().replace('\'', "'\\''"),
-            );
-            let _ = std::fs::write(&tmp, &script);
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
             let _ = std::process::Command::new("open").args(["-a", terminal]).arg(&tmp).spawn();
         }
     }
 
     #[cfg(target_os = "linux")]
     {
-        let cmd = format!("cd '{}' && {} chat --resume \"{}\"",
-            working_dir.replace('\'', "'\\''"), config.kiro_cli_path, escaped_prompt);
+        let cmd = format!("exec '{}' resume '{}' '{}'", boo, job_name, prompt.replace('\'', "'\\''"));
         let terminals = [("x-terminal-emulator", vec!["-e"]), ("gnome-terminal", vec!["--"]), ("xterm", vec!["-e"])];
         for (term, args) in &terminals {
             let mut c = std::process::Command::new(term);
@@ -199,8 +202,7 @@ fn resume_with_prompt(working_dir: &str, prompt: &str) {
 
     #[cfg(target_os = "windows")]
     {
-        let cmd = format!("cd /d \"{}\" && {} chat --resume \"{}\"",
-            working_dir, config.kiro_cli_path, escaped_prompt);
+        let cmd = format!("\"{}\" resume \"{}\" \"{}\"", boo, job_name, prompt);
         let _ = std::process::Command::new("cmd").args(["/C", "start", "cmd", "/K", &cmd]).spawn();
     }
 }

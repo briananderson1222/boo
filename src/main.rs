@@ -108,7 +108,14 @@ enum Commands {
         output: bool,
     },
     /// Resume an interactive kiro-cli session (to follow up on a previous run)
-    Resume { target: Option<String> },
+    Resume {
+        target: Option<String>,
+        /// Optional follow-up prompt to send immediately
+        prompt: Option<String>,
+        /// Show session picker instead of resuming latest
+        #[arg(long)]
+        previous: bool,
+    },
     /// Install boo as auto-start service
     Install,
     /// Remove boo from auto-start
@@ -162,7 +169,7 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
         Commands::Run { target, no_notify } => cmd_run(&target, no_notify).await,
         Commands::Next { cron_expr, count } => cmd_next(&cron_expr, count),
         Commands::Logs { target, count, output } => cmd_logs(&target, count, output),
-        Commands::Resume { target } => cmd_resume(target.as_deref()),
+        Commands::Resume { target, prompt, previous } => cmd_resume(target.as_deref(), prompt.as_deref(), previous),
         Commands::Install => cmd_install(),
         Commands::Uninstall => cmd_uninstall(),
         Commands::_Notify { .. } => unreachable!("handled before tokio runtime"),
@@ -456,7 +463,7 @@ fn cmd_logs(target: &str, count: usize, output: bool) -> boo::error::Result<()> 
     Ok(())
 }
 
-fn cmd_resume(target: Option<&str>) -> boo::error::Result<()> {
+fn cmd_resume(target: Option<&str>, prompt: Option<&str>, previous: bool) -> boo::error::Result<()> {
     let config = Config::load();
     let (dir, agent) = if let Some(t) = target {
         let store = JobStore::new()?;
@@ -465,14 +472,22 @@ fn cmd_resume(target: Option<&str>) -> boo::error::Result<()> {
     } else {
         (boo::config::boo_dir().join("workspace"), None)
     };
-    println!("Opening session picker (dir: {})", dir.display());
+
     let mut cmd = std::process::Command::new(&config.kiro_cli_path);
-    cmd.args(["chat", "--resume-picker"]);
+    cmd.arg("chat");
+    if previous {
+        cmd.arg("--resume-picker");
+    } else {
+        cmd.arg("--resume");
+    }
     if let Some(ref a) = agent { cmd.args(["--agent", a]); }
+    if let Some(p) = prompt {
+        cmd.args(["--", p]);
+    }
     cmd.current_dir(&dir);
     let status = cmd.status().map_err(boo::error::BooError::Io)?;
     if !status.success() {
-        return Err(boo::error::BooError::Other("kiro-cli session picker exited with error".into()));
+        return Err(boo::error::BooError::Other("kiro-cli session exited with error".into()));
     }
     Ok(())
 }
