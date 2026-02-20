@@ -145,6 +145,7 @@ fn build_command(job: &Job, config: &Config) -> Command {
     }
     cmd.current_dir(&job.working_dir);
     cmd.env("BOO_NON_INTERACTIVE", "1");
+    cmd.env("BOO_JOB_NAME", &job.name);
     cmd
 }
 

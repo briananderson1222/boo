@@ -145,6 +145,15 @@ fn install_linux(binary_path: &std::path::Path) -> Result<PathBuf> {
     
     std::fs::write(&service_path, service_content)?;
     
+    // Register boo:// URL scheme via .desktop file
+    let apps_dir = home.join(".local/share/applications");
+    std::fs::create_dir_all(&apps_dir)?;
+    std::fs::write(apps_dir.join("boo-handler.desktop"), format!(
+        "[Desktop Entry]\nName=Boo\nExec={} %u\nType=Application\nNoDisplay=true\nMimeType=x-scheme-handler/boo;\n",
+        binary_path.display()
+    ))?;
+    let _ = Command::new("xdg-mime").args(["default", "boo-handler.desktop", "x-scheme-handler/boo"]).output();
+
     // Reload systemd and enable service
     let reload_output = Command::new("systemctl")
         .args(["--user", "daemon-reload"])
@@ -154,14 +163,11 @@ fn install_linux(binary_path: &std::path::Path) -> Result<PathBuf> {
         .args(["--user", "enable", "boo"])
         .output();
     
-    // Check if systemd commands failed
     if let (Ok(reload), Ok(enable)) = (reload_output, enable_output) {
         if !reload.status.success() || !enable.status.success() {
-            // Fallback to crontab instructions
             print_crontab_instructions(binary_path);
         }
     } else {
-        // Systemd not available, print crontab instructions
         print_crontab_instructions(binary_path);
     }
     
@@ -214,12 +220,18 @@ fn install_windows(binary_path: &std::path::Path) -> Result<PathBuf> {
     
     let bat_content = format!("@echo off\n\"{}\" daemon\n", binary_path.display());
     std::fs::write(&bat_path, bat_content)?;
+
+    // Register boo:// URL scheme
+    let bin = binary_path.to_string_lossy();
+    let _ = Command::new("reg").args(["add", "HKCU\\Software\\Classes\\boo", "/ve", "/d", "URL:Boo Protocol", "/f"]).output();
+    let _ = Command::new("reg").args(["add", "HKCU\\Software\\Classes\\boo", "/v", "URL Protocol", "/d", "", "/f"]).output();
+    let _ = Command::new("reg").args(["add", "HKCU\\Software\\Classes\\boo\\shell\\open\\command", "/ve", "/d", &format!("\"{}\" \"%1\"", bin), "/f"]).output();
     
     println!("Created startup batch file at: {}", bat_path.display());
+    println!("Registered boo:// URL scheme");
     println!("To enable auto-start:");
     println!("1. Press Win+R, type 'shell:startup', press Enter");
     println!("2. Copy {} to the Startup folder", bat_path.display());
-    println!("Or add to registry Run key manually.");
     
     Ok(bat_path)
 }
@@ -285,6 +297,17 @@ fn generate_app_bundle(binary_path: &std::path::Path, app_dir: &std::path::Path)
 	<string>boo.icns</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Boo URL Scheme</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>boo</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>"#)?;
 

@@ -134,6 +134,17 @@ enum Commands {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    // Handle boo:// URL scheme (launched by OS when clicking boo:// links)
+    if args.len() == 2 && args[1].starts_with("boo://") {
+        if let Err(e) = handle_url(&args[1]) {
+            eprintln!("Error handling URL: {e}");
+            process::exit(1);
+        }
+        return;
+    }
+
     let cli = Cli::parse();
 
     // Handle notification subprocess on main thread (required for macOS notification delegate)
@@ -152,6 +163,73 @@ fn main() {
                 process::exit(1);
             }
         });
+}
+
+/// Handle boo:// URL scheme.
+/// Format: boo://resume/<job>?prompt=<text>&previous=true
+///         boo://run/<job>
+///         boo://open/<job>
+fn handle_url(url: &str) -> boo::error::Result<()> {
+    let url = url.strip_prefix("boo://").unwrap_or(url);
+    let (path, query) = url.split_once('?').unwrap_or((url, ""));
+    let parts: Vec<&str> = path.trim_end_matches('/').split('/').collect();
+
+    let params: std::collections::HashMap<&str, String> = query.split('&')
+        .filter(|s| !s.is_empty())
+        .filter_map(|kv| kv.split_once('='))
+        .map(|(k, v)| (k, urldecode(v)))
+        .collect();
+
+    match parts.first().copied() {
+        Some("resume") => {
+            let target = parts.get(1).copied();
+            let prompt = params.get("prompt").map(|s| s.as_str());
+            let previous = params.get("previous").is_some_and(|v| v == "true");
+            cmd_resume(target, prompt, previous)
+        }
+        Some("run") => {
+            let target = parts.get(1).ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all().build().unwrap()
+                .block_on(cmd_run(target, false))
+        }
+        Some("open") => {
+            let target = parts.get(1).ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
+            let store = JobStore::new()?;
+            let job = resolve_job(&store, target)?;
+            if let Some(ref artifact) = job.open_artifact {
+                if let Some(path) = boo::job::resolve_artifact(&job.working_dir, artifact) {
+                    #[cfg(target_os = "macos")]
+                    { let _ = std::process::Command::new("open").arg(&path).spawn(); }
+                    #[cfg(target_os = "linux")]
+                    { let _ = std::process::Command::new("xdg-open").arg(&path).spawn(); }
+                    #[cfg(target_os = "windows")]
+                    { let _ = std::process::Command::new("cmd").args(["/C", "start", "", &path.to_string_lossy()]).spawn(); }
+                }
+            }
+            Ok(())
+        }
+        _ => Err(boo::error::BooError::Other(format!("Unknown URL action: {url}")))
+    }
+}
+
+fn urldecode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            let hi = chars.next().and_then(|c| (c as char).to_digit(16));
+            let lo = chars.next().and_then(|c| (c as char).to_digit(16));
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push((h * 16 + l) as u8 as char);
+            }
+        } else if b == b'+' {
+            out.push(' ');
+        } else {
+            out.push(b as char);
+        }
+    }
+    out
 }
 
 async fn run(cli: Cli) -> boo::error::Result<()> {

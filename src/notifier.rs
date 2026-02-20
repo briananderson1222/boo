@@ -42,9 +42,20 @@ pub fn notify_start(job_names: &[&str]) {
 /// Spawn the internal-notify child process.
 fn spawn_notify(summary: &str, body: &str, open: Option<&str>, working_dir: Option<&str>) {
     if cfg!(test) || std::env::var_os("BOO_NO_NOTIFY").is_some() { return; }
-    let exe = match std::env::current_exe() {
-        Ok(e) => e,
-        Err(_) => return,
+
+    // Prefer the .app bundle binary (required for native notifications on macOS)
+    let exe = {
+        #[cfg(target_os = "macos")]
+        {
+            let bundle = dirs::home_dir()
+                .map(|h| h.join("Applications/Boo.app/Contents/MacOS/boo"));
+            match bundle {
+                Some(p) if p.exists() => p,
+                _ => std::env::current_exe().unwrap_or_else(|_| "boo".into()),
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        { std::env::current_exe().unwrap_or_else(|_| "boo".into()) }
     };
     let mut cmd = std::process::Command::new(exe);
     cmd.args(["internal-notify", summary, body])
