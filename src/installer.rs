@@ -90,7 +90,10 @@ fn install_macos(binary_path: &std::path::Path) -> Result<PathBuf> {
 
     // Create URL scheme handler (boo:// links from browser/HTML artifacts)
     let url_app = home.join("Applications/BooURL.app");
-    generate_url_handler(&bundle_binary, &url_app)?;
+    match generate_url_handler(&bundle_binary, &url_app) {
+        Ok(()) => println!("Created BooURL.app for boo:// URL scheme"),
+        Err(e) => eprintln!("Warning: could not create URL handler (swiftc required): {e}"),
+    }
 
     let plist_dir = home.join("Library/LaunchAgents");
     std::fs::create_dir_all(&plist_dir)?;
