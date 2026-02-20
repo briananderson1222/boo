@@ -120,16 +120,31 @@ enum Commands {
         body: String,
         #[arg(long)]
         open: Option<String>,
+        /// Working directory for inline reply resume
+        #[arg(long)]
+        working_dir: Option<String>,
     },
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let cli = Cli::parse();
-    if let Err(e) = run(cli).await {
-        eprintln!("Error: {e}");
-        process::exit(1);
+
+    // Handle notification subprocess on main thread (required for macOS notification delegate)
+    if let Commands::_Notify { summary, body, open, working_dir } = cli.command {
+        boo::notifier::send_and_exit(&summary, &body, open.as_deref(), working_dir.as_deref());
+        return;
     }
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            if let Err(e) = run(cli).await {
+                eprintln!("Error: {e}");
+                process::exit(1);
+            }
+        });
 }
 
 async fn run(cli: Cli) -> boo::error::Result<()> {
@@ -150,10 +165,7 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
         Commands::Resume { target } => cmd_resume(target.as_deref()),
         Commands::Install => cmd_install(),
         Commands::Uninstall => cmd_uninstall(),
-        Commands::_Notify { summary, body, open } => {
-            boo::notifier::send_and_exit(&summary, &body, open.as_deref()).await;
-            Ok(())
-        }
+        Commands::_Notify { .. } => unreachable!("handled before tokio runtime"),
     }
 }
 
