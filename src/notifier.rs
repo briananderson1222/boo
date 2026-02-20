@@ -11,14 +11,13 @@ pub fn notify(job: &Job, result: &ExecutionResult) {
     };
 
     let body = result.response.as_deref()
-        .map(|r| r.chars().take(200).collect::<String>())
+        .map(|r| r.trim_start_matches(['>', ' ', '\n']).chars().take(200).collect::<String>())
         .unwrap_or_default();
 
     let open_path = job.open_artifact.as_ref()
-        .and_then(|a| job::resolve_artifact(&job.working_dir, a))
-        .unwrap_or_else(|| result.output_path.with_extension("response"));
+        .and_then(|a| job::resolve_artifact(&job.working_dir, a));
 
-    spawn_notify(&summary, &body, Some(&open_path.to_string_lossy()), Some(&job.working_dir.to_string_lossy()));
+    spawn_notify(&summary, &body, open_path.as_ref().map(|p| p.to_string_lossy().as_ref().to_owned()).as_deref(), Some(&job.working_dir.to_string_lossy()));
 }
 
 /// Send an error/timeout notification for a job.
