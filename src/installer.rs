@@ -88,6 +88,10 @@ fn install_macos(binary_path: &std::path::Path) -> Result<PathBuf> {
     generate_app_bundle(binary_path, &app_dir)?;
     let bundle_binary = app_dir.join("Contents/MacOS/boo");
 
+    // Create URL scheme handler (boo:// links from browser/HTML artifacts)
+    let url_app = home.join("Applications/BooURL.app");
+    generate_url_handler(&bundle_binary, &url_app)?;
+
     let plist_dir = home.join("Library/LaunchAgents");
     std::fs::create_dir_all(&plist_dir)?;
     
@@ -105,6 +109,7 @@ fn install_macos(binary_path: &std::path::Path) -> Result<PathBuf> {
     }
     
     println!("Created Boo.app at {}", app_dir.display());
+    println!("Created BooURL.app for boo:// URL scheme");
     Ok(plist_path)
 }
 
@@ -123,6 +128,11 @@ fn uninstall_macos() -> Result<()> {
     let app_dir = home.join("Applications/Boo.app");
     if app_dir.exists() {
         std::fs::remove_dir_all(&app_dir)?;
+    }
+
+    let url_app = home.join("Applications/BooURL.app");
+    if url_app.exists() {
+        std::fs::remove_dir_all(&url_app)?;
     }
     
     Ok(())
@@ -297,6 +307,52 @@ fn generate_app_bundle(binary_path: &std::path::Path, app_dir: &std::path::Path)
 	<string>boo.icns</string>
 	<key>LSUIElement</key>
 	<true/>
+</dict>
+</plist>"#)?;
+
+    // Ad-hoc codesign
+    let _ = Command::new("codesign")
+        .args(["--force", "--sign", "-", &app_dir.to_string_lossy()])
+        .output();
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn generate_url_handler(boo_binary: &std::path::Path, app_dir: &std::path::Path) -> Result<()> {
+    let contents = app_dir.join("Contents");
+    let macos_dir = contents.join("MacOS");
+    std::fs::create_dir_all(&macos_dir)?;
+
+    // Compile the Swift URL handler
+    let swift_src = format!(r#"import Cocoa
+class D:NSObject,NSApplicationDelegate{{func application(_ a:NSApplication,open urls:[URL]){{for u in urls{{let t=Process();t.executableURL=URL(fileURLWithPath:"{}");t.arguments=[u.absoluteString];try? t.run()}};NSApp.terminate(nil)}}}};let a=NSApplication.shared;a.delegate=D();a.run()"#,
+        boo_binary.to_string_lossy());
+
+    let src_path = std::env::temp_dir().join("boo-url-handler.swift");
+    std::fs::write(&src_path, &swift_src)?;
+
+    let output = Command::new("swiftc")
+        .args([src_path.to_str().unwrap(), "-o", macos_dir.join("BooURL").to_str().unwrap()])
+        .output()?;
+    if !output.status.success() {
+        return Err(BooError::Other(format!("Failed to compile URL handler: {}", String::from_utf8_lossy(&output.stderr))));
+    }
+
+    std::fs::write(contents.join("Info.plist"), r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.boo.url-handler</string>
+	<key>CFBundleName</key>
+	<string>BooURL</string>
+	<key>CFBundleExecutable</key>
+	<string>BooURL</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>LSUIElement</key>
+	<true/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -311,9 +367,13 @@ fn generate_app_bundle(binary_path: &std::path::Path, app_dir: &std::path::Path)
 </dict>
 </plist>"#)?;
 
-    // Ad-hoc codesign
     let _ = Command::new("codesign")
         .args(["--force", "--sign", "-", &app_dir.to_string_lossy()])
+        .output();
+
+    // Register with Launch Services
+    let _ = Command::new("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
+        .args(["-R", &app_dir.to_string_lossy()])
         .output();
 
     Ok(())
