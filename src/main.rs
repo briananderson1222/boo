@@ -151,7 +151,7 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
         Commands::Install => cmd_install(),
         Commands::Uninstall => cmd_uninstall(),
         Commands::_Notify { summary, body, open } => {
-            boo::notifier::send_and_exit(&summary, &body, open.as_deref());
+            boo::notifier::send_and_exit(&summary, &body, open.as_deref()).await;
             Ok(())
         }
     }

@@ -82,15 +82,20 @@ fn get_boo_binary_path() -> Result<PathBuf> {
 #[cfg(target_os = "macos")]
 fn install_macos(binary_path: &std::path::Path) -> Result<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| BooError::Other("Could not determine home directory".to_string()))?;
+
+    // Create .app bundle (required for user-notify native notifications on macOS)
+    let app_dir = home.join("Applications/Boo.app");
+    generate_app_bundle(binary_path, &app_dir)?;
+    let bundle_binary = app_dir.join("Contents/MacOS/boo");
+
     let plist_dir = home.join("Library/LaunchAgents");
     std::fs::create_dir_all(&plist_dir)?;
     
     let plist_path = plist_dir.join("com.boo.scheduler.plist");
-    let plist_content = generate_plist(binary_path, &boo_dir());
+    let plist_content = generate_plist(&bundle_binary, &boo_dir());
     
     std::fs::write(&plist_path, plist_content)?;
     
-    // Load the service
     let output = Command::new("launchctl")
         .args(["load", &plist_path.to_string_lossy()])
         .output()?;
@@ -99,6 +104,7 @@ fn install_macos(binary_path: &std::path::Path) -> Result<PathBuf> {
         return Err(BooError::Other(format!("Failed to load launchd service: {}", String::from_utf8_lossy(&output.stderr))));
     }
     
+    println!("Created Boo.app at {}", app_dir.display());
     Ok(plist_path)
 }
 
@@ -111,8 +117,12 @@ fn uninstall_macos() -> Result<()> {
         let _ = Command::new("launchctl")
             .args(["unload", &plist_path.to_string_lossy()])
             .output();
-        
         std::fs::remove_file(plist_path)?;
+    }
+
+    let app_dir = home.join("Applications/Boo.app");
+    if app_dir.exists() {
+        std::fs::remove_dir_all(&app_dir)?;
     }
     
     Ok(())
@@ -233,6 +243,58 @@ fn is_installed_windows() -> bool {
     home.join("boo-startup.bat").exists()
 }
 
+
+#[cfg(target_os = "macos")]
+static EMBEDDED_ICON: &[u8] = include_bytes!("../assets/boo.icns");
+
+#[cfg(target_os = "macos")]
+fn generate_app_bundle(binary_path: &std::path::Path, app_dir: &std::path::Path) -> Result<()> {
+    let contents = app_dir.join("Contents");
+    let macos_dir = contents.join("MacOS");
+    let resources = contents.join("Resources");
+    std::fs::create_dir_all(&macos_dir)?;
+    std::fs::create_dir_all(&resources)?;
+
+    // Copy binary into bundle
+    let dest = macos_dir.join("boo");
+    if dest.exists() { std::fs::remove_file(&dest)?; }
+    std::fs::copy(binary_path, &dest)?;
+
+    // Icon: user override > embedded default
+    let icon_dest = resources.join("boo.icns");
+    let user_icon = boo_dir().join("icon.icns");
+    if user_icon.exists() {
+        std::fs::copy(&user_icon, &icon_dest)?;
+    } else {
+        std::fs::write(&icon_dest, EMBEDDED_ICON)?;
+    }
+
+    std::fs::write(contents.join("Info.plist"), r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.boo.scheduler</string>
+	<key>CFBundleName</key>
+	<string>Boo</string>
+	<key>CFBundleExecutable</key>
+	<string>boo</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleIconFile</key>
+	<string>boo.icns</string>
+	<key>LSUIElement</key>
+	<true/>
+</dict>
+</plist>"#)?;
+
+    // Ad-hoc codesign
+    let _ = Command::new("codesign")
+        .args(["--force", "--sign", "-", &app_dir.to_string_lossy()])
+        .output();
+
+    Ok(())
+}
 pub fn generate_plist(binary_path: &std::path::Path, boo_dir: &std::path::Path) -> String {
     format!(r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

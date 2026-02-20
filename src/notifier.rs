@@ -14,13 +14,11 @@ pub fn notify(job: &Job, result: &ExecutionResult) {
         .map(|r| r.chars().take(200).collect::<String>())
         .unwrap_or_default();
 
-    // Resolve what to open on click: open_artifact (glob-aware) or .response file
     let open_path = job.open_artifact.as_ref()
         .and_then(|a| job::resolve_artifact(&job.working_dir, a))
         .unwrap_or_else(|| result.output_path.with_extension("response"));
 
-    let open_str = open_path.to_string_lossy().to_string();
-    spawn_notify(&summary, &body, Some(&open_str));
+    spawn_notify(&summary, &body, Some(&open_path.to_string_lossy()));
 }
 
 /// Send an error/timeout notification for a job.
@@ -49,25 +47,53 @@ fn spawn_notify(summary: &str, body: &str, open: Option<&str>) {
         Err(_) => return,
     };
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(["internal-notify", summary, body]);
+    cmd.args(["internal-notify", summary, body])
+        .stderr(std::process::Stdio::null());
     if let Some(path) = open {
         cmd.args(["--open", path]);
     }
     let _ = cmd.spawn();
 }
 
-/// Called by the hidden `internal-notify` subcommand. Sends notification and exits.
-pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>) {
-    let result = notify_rust::Notification::new()
-        .appname("boo")
-        .summary(summary)
-        .body(body)
-        .sound_name("default")
-        .show();
+/// Called by the hidden `internal-notify` subcommand.
+pub async fn send_and_exit(summary: &str, body: &str, open: Option<&str>) {
+    send_impl(summary, body, open).await;
+}
 
-    if let (Some(path), Ok(_)) = (open, &result) {
+async fn send_impl(summary: &str, body: &str, open: Option<&str>) {
+    use user_notify::NotificationBuilder;
+
+    let manager = user_notify::get_notification_manager("com.boo.scheduler".into(), None);
+
+    match manager.first_time_ask_for_notification_permission().await {
+        Ok(true) => {}
+        Ok(false) => {
+            eprintln!("Notification permission denied. Enable in System Settings > Notifications > Boo");
+            if let Some(path) = open { open_file(path); }
+            return;
+        }
+        Err(e) => {
+            eprintln!("Permission request error: {e}");
+            if let Some(path) = open { open_file(path); }
+            return;
+        }
+    }
+
+    let n = NotificationBuilder::new()
+        .title(summary)
+        .body(body);
+
+    if let Err(e) = manager.send_notification(n).await {
+        eprintln!("Notification error: {e}");
+    }
+
+    // Open artifact directly (click-to-open requires MainThreadMarker, future improvement)
+    if let Some(path) = open {
         open_file(path);
     }
+
+    std::mem::forget(manager);
+    std::process::exit(0);
 }
 
 /// Open a file with the system default handler.
