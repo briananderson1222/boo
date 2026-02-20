@@ -185,7 +185,16 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
             let target = parts.get(1).copied();
             let prompt = params.get("prompt").map(|s| s.as_str());
             let previous = params.get("previous").is_some_and(|v| v == "true");
-            cmd_resume(target, prompt, previous)
+            // URL scheme launches without a terminal — need to open one
+            if let Some(t) = target {
+                let store = JobStore::new()?;
+                let job = resolve_job(&store, t)?;
+                let dir = job.working_dir.to_string_lossy().to_string();
+                boo::notifier::open_terminal_resume(&dir, t, prompt, previous);
+                Ok(())
+            } else {
+                cmd_resume(target, prompt, previous)
+            }
         }
         Some("run") => {
             let target = parts.get(1).ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;

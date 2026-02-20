@@ -73,7 +73,8 @@ tests/
 | `serde` / `serde_json` | JSON persistence |
 | `chrono` / `chrono-tz` | Time handling |
 | `uuid` | Job IDs |
-| `notify-rust` | Desktop notifications (cross-platform) |
+| `user-notify` | Native desktop notifications (cross-platform) |
+| `glob` | Glob pattern matching for artifact resolution |
 | `fs2` | File locking |
 | `dirs` | Cross-platform config directories |
 | `libc` | PID alive check (Unix only) |
@@ -89,6 +90,7 @@ Dev dependencies: `proptest`, `tempfile`, `assert_cmd`, `predicates`
 - Errors in spawned job tasks are caught with `eprintln!`, never crash the daemon
 - `&Path` over `&PathBuf` in function signatures
 - No `unwrap()` in production code (only in tests and MockClock mutex access)
+- **DRY**: consolidate shared logic into `lib.rs` or shared functions. Check for existing implementations before writing new code. If similar logic exists in multiple places, refactor into a single source of truth.
 - **Every code change must include corresponding tests.** No exceptions. If a feature is added or a bug is fixed, a test proving it works must accompany the change.
 
 ## Maintaining This File
