@@ -3,6 +3,7 @@ use crate::config::{Config, runs_dir};
 use crate::cron_eval;
 use crate::executor;
 use crate::job::{Job, RunRecord};
+use crate::notification_service::{NotificationSender, NotifyRequest};
 use crate::notifier;
 use crate::store::JobStore;
 use std::collections::HashSet;
@@ -18,6 +19,7 @@ pub struct Scheduler<C: Clock> {
     store_dir: Option<PathBuf>,
     running_jobs: Arc<Mutex<HashSet<Uuid>>>,
     shutdown: Arc<tokio::sync::Notify>,
+    notification_sender: Option<NotificationSender>,
 }
 
 impl<C: Clock + 'static> Scheduler<C> {
@@ -28,7 +30,13 @@ impl<C: Clock + 'static> Scheduler<C> {
             store_dir,
             running_jobs: Arc::new(Mutex::new(HashSet::new())),
             shutdown: Arc::new(tokio::sync::Notify::new()),
+            notification_sender: None,
         }
+    }
+
+    pub fn with_notification_sender(mut self, sender: NotificationSender) -> Self {
+        self.notification_sender = Some(sender);
+        self
     }
 
     pub async fn run(&self) {
@@ -76,7 +84,17 @@ impl<C: Clock + 'static> Scheduler<C> {
             .map(|j| j.name.as_str())
             .collect();
         if !start_names.is_empty() {
-            notifier::notify_start(&start_names);
+            if let Some(ref sender) = self.notification_sender {
+                for name in &start_names {
+                    sender.send(NotifyRequest {
+                        summary: format!("🚀 Job '{}' starting...", name),
+                        body: format!("Run 'boo disable {}' to pause", name),
+                        open: None, working_dir: None,
+                    });
+                }
+            } else {
+                notifier::notify_start(&start_names);
+            }
         }
 
         for job in to_fire {
@@ -89,14 +107,24 @@ impl<C: Clock + 'static> Scheduler<C> {
         let store_dir = self.store_dir.clone();
         let running_jobs = self.running_jobs.clone();
         let clock = self.clock.clone();
+        let sender = self.notification_sender.clone();
 
         tokio::spawn(async move {
             { running_jobs.lock().await.insert(job.id); }
 
-            let result = Self::execute_with_retry(job.clone(), config, store_dir, clock).await;
+            let result = Self::execute_with_retry(job.clone(), config, store_dir, clock, sender.clone()).await;
             if let Err(e) = &result {
                 eprintln!("Job execution failed for {}: {e}", job.name);
-                notifier::notify_error(&job, &e.to_string());
+                if let Some(ref s) = sender {
+                    s.send(NotifyRequest {
+                        summary: format!("✗ Job '{}' error", job.name),
+                        body: e.to_string(),
+                        open: None,
+                        working_dir: Some(job.working_dir.to_string_lossy().to_string()),
+                    });
+                } else {
+                    notifier::notify_error(&job, &e.to_string());
+                }
             }
 
             { running_jobs.lock().await.remove(&job.id); }
@@ -108,12 +136,13 @@ impl<C: Clock + 'static> Scheduler<C> {
         config: Config,
         store_dir: Option<PathBuf>,
         clock: C,
+        sender: Option<NotificationSender>,
     ) -> crate::error::Result<()> {
-        let max_attempts = job.retry_count + 1; // retry_count=0 means 1 attempt
+        let max_attempts = job.retry_count + 1;
         let mut last_err = None;
 
         for attempt in 1..=max_attempts {
-            match Self::execute_job_impl(&job, &config, &store_dir, &clock, attempt, max_attempts).await {
+            match Self::execute_job_impl(&job, &config, &store_dir, &clock, attempt, max_attempts, &sender).await {
                 Ok(success) => {
                     if success {
                         // Delete one-shot jobs after success
@@ -152,6 +181,7 @@ impl<C: Clock + 'static> Scheduler<C> {
         clock: &C,
         _attempt: u32,
         _max_attempts: u32,
+        sender: &Option<NotificationSender>,
     ) -> crate::error::Result<bool> {
         let store = Self::make_store(store_dir)?;
         let now = clock.now();
@@ -204,7 +234,7 @@ impl<C: Clock + 'static> Scheduler<C> {
         updated.last_run = Some(now);
         store.update_job(&updated)?;
 
-        notifier::notify(job, &result);
+        notifier::send_notification(job, &result, sender);
 
         Ok(result.success)
     }

@@ -160,6 +160,15 @@ fn main() {
         return;
     }
 
+    // Handle daemon on main thread (notification service needs main thread for macOS)
+    if let Commands::Daemon = &cli.command {
+        if let Err(e) = cmd_daemon_blocking() {
+            eprintln!("Error: {e}");
+            process::exit(1);
+        }
+        return;
+    }
+
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -250,7 +259,7 @@ fn urldecode(s: &str) -> String {
 
 async fn run(cli: Cli) -> boo::error::Result<()> {
     match cli.command {
-        Commands::Daemon => cmd_daemon().await,
+        Commands::Daemon => unreachable!("handled before tokio runtime"),
         Commands::Add { name, cron, at, every, prompt, command, dir, agent, model, timeout,
                         timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, runner } =>
             cmd_add(name, cron, at, every, prompt, command, dir, agent, model, timeout,
@@ -272,7 +281,9 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
 
 // --- Async commands ---
 
-async fn cmd_daemon() -> boo::error::Result<()> {
+/// Notification service must run on main thread (macOS requirement).
+/// Daemon runs tokio on a background thread.
+fn cmd_daemon_blocking() -> boo::error::Result<()> {
     use fs2::FileExt;
     use std::fs::File;
 
@@ -290,12 +301,25 @@ async fn cmd_daemon() -> boo::error::Result<()> {
     std::fs::write(&pid_path, process::id().to_string())?;
 
     let config = Config::load();
-    let scheduler = Arc::new(Scheduler::new(SystemClock, config, None));
-    let s = Arc::clone(&scheduler);
-    tokio::spawn(async move { let _ = tokio::signal::ctrl_c().await; s.trigger_shutdown(); });
+    let notification_sender = boo::notification_service::NotificationSender::start_on_main_thread();
+    let scheduler = Arc::new(Scheduler::new(SystemClock, config, None).with_notification_sender(notification_sender.clone()));
 
-    scheduler.run().await;
-    let _ = std::fs::remove_file(&pid_path);
+    // Run tokio + scheduler on a background thread
+    let s = scheduler.clone();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all().build().unwrap();
+        rt.block_on(async {
+            let s2 = s.clone();
+            tokio::spawn(async move { let _ = tokio::signal::ctrl_c().await; s2.trigger_shutdown(); });
+            s.run().await;
+        });
+        let _ = std::fs::remove_file(&pid_path);
+        std::process::exit(0);
+    });
+
+    // Main thread: pump CFRunLoop for notification callbacks
+    notification_sender.run_loop();
     Ok(())
 }
 

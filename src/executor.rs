@@ -32,7 +32,7 @@ pub struct KiroRunner;
 impl Runner for KiroRunner {
     fn build_command(&self, job: &Job, config: &Config) -> Command {
         let mut cmd = Command::new(&config.kiro_cli_path);
-        cmd.args(["chat", "--no-interactive", "--trust-all-tools", "--wrap", "never"]);
+        cmd.args(["chat", "--no-interactive", "--trust-all-tools", "--wrap", "never", "--require-mcp-startup"]);
         if let Some(ref agent) = job.agent { cmd.args(["--agent", agent]); }
         if let Some(ref model) = job.model { cmd.args(["--model", model]); }
         cmd.current_dir(&job.working_dir);

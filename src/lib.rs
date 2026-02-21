@@ -6,6 +6,7 @@ pub mod executor;
 pub mod installer;
 pub mod job;
 pub mod notifier;
+pub mod notification_service;
 pub mod scheduler;
 pub mod store;
 

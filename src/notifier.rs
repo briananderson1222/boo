@@ -1,5 +1,6 @@
 use crate::executor::ExecutionResult;
 use crate::job::{self, Job};
+use crate::notification_service::{NotificationSender, NotifyRequest};
 
 /// Send a completion/failure notification. Optionally opens an artifact on click.
 pub fn notify(job: &Job, result: &ExecutionResult) {
@@ -18,6 +19,32 @@ pub fn notify(job: &Job, result: &ExecutionResult) {
         .and_then(|a| job::resolve_artifact(&job.working_dir, a));
 
     spawn_notify(&summary, &body, open_path.as_ref().map(|p| p.to_string_lossy().as_ref().to_owned()).as_deref(), Some(&job.working_dir.to_string_lossy()));
+}
+
+/// Send a notification using the daemon's sender if available, otherwise subprocess.
+pub fn send_notification(job: &Job, result: &ExecutionResult, sender: &Option<NotificationSender>) {
+    let summary = if result.success {
+        format!("✓ Job '{}' completed ({:.1}s)", job.name, result.duration_secs)
+    } else {
+        let code = result.exit_code.map(|c| format!("exit {c}")).unwrap_or("killed".into());
+        format!("✗ Job '{}' failed ({}, {:.1}s)", job.name, code, result.duration_secs)
+    };
+    let body = result.response.as_deref()
+        .map(|r| r.trim_start_matches(['>', ' ', '\n']).chars().take(200).collect::<String>())
+        .unwrap_or_default();
+    let open_path = job.open_artifact.as_ref()
+        .and_then(|a| job::resolve_artifact(&job.working_dir, a));
+
+    if let Some(s) = sender {
+        s.send(NotifyRequest {
+            summary,
+            body,
+            open: open_path.map(|p| p.to_string_lossy().to_string()),
+            working_dir: Some(job.working_dir.to_string_lossy().to_string()),
+        });
+    } else {
+        spawn_notify(&summary, &body, open_path.as_ref().map(|p| p.to_string_lossy().as_ref().to_owned()).as_deref(), Some(&job.working_dir.to_string_lossy()));
+    }
 }
 
 /// Send an error/timeout notification for a job.
@@ -181,7 +208,7 @@ pub fn open_terminal_resume(_working_dir: &str, job_name: &str, prompt: Option<&
             }
             "Terminal"
         });
-        let tmp = crate::config::boo_dir().join("reply.command");
+        let tmp = crate::config::boo_dir().join(format!("reply-{}.command", std::process::id()));
         let _ = std::fs::write(&tmp, format!("#!/bin/sh\nexec {args}\n"));
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
@@ -190,7 +217,7 @@ pub fn open_terminal_resume(_working_dir: &str, job_name: &str, prompt: Option<&
                 tmp.to_string_lossy().replace('\'', "'\\''"));
             let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
         } else {
-            let _ = std::process::Command::new("open").args(["-a", terminal]).arg(&tmp).spawn();
+            let _ = std::process::Command::new("open").args(["-a", terminal]).arg(&tmp).status();
         }
     }
 
@@ -221,6 +248,10 @@ fn resume_with_prompt(working_dir: &str, prompt: &str) {
 }
 
 /// Open a file with the system default handler.
+pub fn open_file_pub(path: &str) {
+    open_file(path);
+}
+
 fn open_file(path: &str) {
     let path = std::path::Path::new(path);
     if !path.exists() { return; }
