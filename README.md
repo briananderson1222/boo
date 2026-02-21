@@ -264,7 +264,7 @@ Optional config at `~/.boo/config.json`:
 ## Development
 
 ```bash
-cargo test              # 60 tests (unit, property-based, CLI integration)
+cargo test              # 70 tests (unit, property-based, CLI integration)
 cargo clippy            # Zero warnings
 cargo build --release   # ~3.3MB binary
 ```
