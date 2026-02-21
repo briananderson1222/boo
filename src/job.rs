@@ -163,4 +163,29 @@ mod tests {
             prop_assert!(job.model.is_none());
         }
     }
+
+    #[test]
+    fn test_resolve_artifact_literal() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("report.html"), "test").unwrap();
+        assert!(resolve_artifact(dir.path(), "report.html").is_some());
+        assert!(resolve_artifact(dir.path(), "missing.html").is_none());
+    }
+
+    #[test]
+    fn test_resolve_artifact_glob() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("daily-2026-01-01.html"), "old").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::fs::write(dir.path().join("daily-2026-01-02.html"), "new").unwrap();
+        let result = resolve_artifact(dir.path(), "daily-*.html");
+        assert!(result.is_some());
+        assert!(result.unwrap().to_string_lossy().contains("2026-01-02"));
+    }
+
+    #[test]
+    fn test_resolve_artifact_no_match() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(resolve_artifact(dir.path(), "*.xyz").is_none());
+    }
 }

@@ -237,6 +237,31 @@ mod tests {
         let _cmd = runner.build_command(&job, &test_config());
     }
 
+    #[test]
+    fn test_get_runner_default_is_kiro() {
+        let job = test_job();
+        let runner = get_runner(&job);
+        // KiroRunner sends prompt via stdin
+        assert!(runner.stdin_bytes(&job).is_some());
+    }
+
+    #[test]
+    fn test_get_runner_shell_via_command() {
+        let mut job = test_job();
+        job.command = Some("echo hello".into());
+        let runner = get_runner(&job);
+        // ShellRunner has no stdin
+        assert!(runner.stdin_bytes(&job).is_none());
+    }
+
+    #[test]
+    fn test_get_runner_explicit_shell() {
+        let mut job = test_job();
+        job.runner = Some("shell".into());
+        let runner = get_runner(&job);
+        assert!(runner.stdin_bytes(&job).is_none());
+    }
+
     #[tokio::test]
     async fn test_execute_job_with_echo() {
         let job = test_job();

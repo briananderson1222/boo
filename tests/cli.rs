@@ -121,3 +121,49 @@ fn test_parse_duration_via_every() {
         boo().args(["remove", &name, "--keep-logs"]).assert().success();
     }
 }
+
+#[test]
+fn test_add_command_shell_job() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut cmd = boo();
+    cmd.env("HOME", dir.path())
+        .args(["add", "--name", "shell-test", "--every", "1h", "--command", "echo hello"])
+        .assert().success()
+        .stdout(predicate::str::contains("Added job 'shell-test'"));
+}
+
+#[test]
+fn test_add_no_prompt_no_command_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut cmd = boo();
+    cmd.env("HOME", dir.path())
+        .args(["add", "--name", "fail-test", "--every", "1h"])
+        .assert().failure()
+        .stderr(predicate::str::contains("--prompt or --command"));
+}
+
+#[test]
+fn test_list_format_json() {
+    let dir = tempfile::tempdir().unwrap();
+    // Add a job first
+    boo().env("HOME", dir.path())
+        .args(["add", "--name", "json-test", "--every", "1h", "--prompt", "hello"])
+        .assert().success();
+    // List as JSON
+    boo().env("HOME", dir.path())
+        .args(["list", "--format", "json"])
+        .assert().success()
+        .stdout(predicate::str::contains("\"name\": \"json-test\""));
+}
+
+#[test]
+fn test_list_format_csv() {
+    let dir = tempfile::tempdir().unwrap();
+    boo().env("HOME", dir.path())
+        .args(["add", "--name", "csv-test", "--every", "1h", "--prompt", "hello"])
+        .assert().success();
+    boo().env("HOME", dir.path())
+        .args(["list", "--format", "csv"])
+        .assert().success()
+        .stdout(predicate::str::contains("csv-test"));
+}
