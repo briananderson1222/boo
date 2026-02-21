@@ -92,7 +92,9 @@ boo add --name "calendar-check" \
 |--------|-------------|---------|
 | `--name` | Job name (must be unique) | required |
 | `--cron` / `--at` / `--every` | Schedule (exactly one required) | required |
-| `--prompt` | Prompt text sent to kiro-cli | required |
+| `--prompt` | Prompt text sent to kiro-cli | required (unless `--command`) |
+| `--command` | Raw shell command (implies `--runner shell`) | — |
+| `--runner` | Runner type: `kiro` (default), `shell` | `kiro` |
 | `--dir` | Working directory for kiro-cli | `~/.boo/workspace/<name>` |
 | `--agent` | Kiro agent to use | default agent |
 | `--model` | Kiro model override | agent default |
@@ -143,15 +145,17 @@ Jobs with `--retry N` will retry up to N times with `--retry-delay` seconds betw
 - **Completion notification**: includes response preview, click to open artifact
 - **Failure notification**: includes exit code and retry status
 
-Notifications are delivered via a child process to work around macOS suppressing notifications from backgrounded daemons.
+Notifications are delivered natively via the `user-notify` crate. On macOS, the daemon sends notifications directly from the main thread for reliable callback handling (click-to-open and inline reply).
 
 ### Clickable Artifacts
 
-When a notification is clicked, it opens:
-1. The `--open-artifact` file (relative to job's working directory), or
-2. The `.response` file from that run (default)
+When a notification is clicked, it opens the `--open-artifact` file (relative to job's working directory) if the glob resolves to an existing file.
 
 Artifact patterns support globs (e.g. `daily-*.html`) — the newest matching file is resolved at notification time. This is useful when agents generate files with dynamic names like timestamps.
+
+### Inline Reply
+
+Notifications include a "Reply" action. Type a follow-up message and it opens an interactive `boo resume <job> "<text>"` session in your terminal (auto-detects iTerm, Ghostty, Alacritty, kitty, WezTerm, or Terminal.app — configurable via `terminal` in config.json).
 
 ### Output Formats
 
@@ -166,9 +170,32 @@ boo list --format csv     # CSV
 Every job run creates a kiro-cli session. Resume any past session for follow-up:
 
 ```bash
-boo resume wrap-up-day    # picker scoped to that job
-boo resume                # picker for default workspace
+boo resume good-morning                    # Resume latest session
+boo resume good-morning "follow up text"   # Resume with a prompt
+boo resume good-morning --previous         # Pick from previous sessions
+boo resume                                 # Resume in default workspace
 ```
+
+### Shell Commands
+
+Not everything needs an AI agent. Use `--command` for raw shell jobs:
+
+```bash
+boo add --name "backup" --every "1d" --command "rsync -a ~/docs /backup/"
+boo add --name "cleanup" --cron "0 3 * * 0" --command "find /tmp -mtime +7 -delete"
+```
+
+### URL Scheme
+
+`boo install` registers the `boo://` URL scheme. Use deep links in HTML artifacts or bookmarks:
+
+```
+boo://resume/good-morning?prompt=tell%20me%20more    # Resume with prompt
+boo://run/catch-up-emails                             # Trigger a job
+boo://open/good-morning                               # Open latest artifact
+```
+
+On macOS, a small Swift helper (BooURL.app) is compiled at install time to handle URL events. Requires Xcode Command Line Tools.
 
 ### Removing Jobs
 
@@ -182,6 +209,7 @@ boo remove my-job --keep-logs    # deletes job, keeps logs
 
 - Prompts are piped via **stdin**, not passed as CLI arguments (not visible in `ps aux`)
 - `BOO_NON_INTERACTIVE=1` env var is set on all spawned kiro-cli processes so agents can detect daemon context
+- `BOO_JOB_NAME` env var is set to the job name so agents know which job they're running as
 - Output files are stored in `~/.boo/runs/` with standard file permissions
 
 ## Output Files
@@ -202,7 +230,8 @@ Optional config at `~/.boo/config.json`:
   "kiro_cli_path": "/usr/local/bin/kiro-cli",
   "default_timeout_secs": 300,
   "max_log_runs": 50,
-  "heartbeat_secs": 30
+  "heartbeat_secs": 30,
+  "terminal": "iTerm"
 }
 ```
 
@@ -237,7 +266,7 @@ Optional config at `~/.boo/config.json`:
 ```bash
 cargo test              # 60 tests (unit, property-based, CLI integration)
 cargo clippy            # Zero warnings
-cargo build --release   # ~2MB binary
+cargo build --release   # ~3.3MB binary
 ```
 
 See [AGENTS.md](AGENTS.md) for architecture details and contributor guidance.

@@ -9,7 +9,7 @@ Cross-platform Rust scheduler daemon that fires kiro-cli prompts on cron/at/ever
 1. **Reliable scheduled AI tasks** — cron, one-shot, and interval scheduling that survives sleep/wake, crashes, and reboots
 2. **Cross-platform** — macOS, Linux, Windows from a single Rust binary
 3. **Heartbeat pattern** — inspired by OpenClaw: periodic tick checks overdue jobs, coalesces missed runs
-4. **Minimal footprint** — single ~2MB binary, no runtime dependencies, no GUI framework
+4. **Minimal footprint** — single ~3.3MB binary, no runtime dependencies, no GUI framework
 5. **Developer-friendly** — CLI-first management, JSON persistence, property-based testing
 
 ## Architecture
@@ -17,17 +17,18 @@ Cross-platform Rust scheduler daemon that fires kiro-cli prompts on cron/at/ever
 ```
 src/
 ├── main.rs           # CLI entry point (clap) — 13 user commands + hidden internal-notify
-├── scheduler.rs      # Heartbeat loop, job spawning, retry loop, delete-after-run, batched start notifications
+├── scheduler.rs      # Heartbeat loop, job spawning, retry loop, delete-after-run, notification integration
 ├── store.rs          # Atomic JSON persistence with file locking (single lock scope per mutation)
-├── executor.rs       # Subprocess spawning, stdin piping, concurrent stdout/stderr capture, timeout + kill
+├── executor.rs       # Runner trait (KiroRunner, ShellRunner), subprocess spawning, stdin piping, timeout + kill
 ├── cron_eval.rs      # Schedule evaluation (cron/at/every), overdue detection, missed count
-├── job.rs            # Job + RunRecord models with schedule types and retry/notification fields
+├── job.rs            # Job + RunRecord models with schedule types, runner/command, retry/notification fields
 ├── config.rs         # Global config (~/.boo/config.json), warns on malformed config
 ├── clock.rs          # Clock trait with Clone bound (SystemClock + MockClock for testing)
-├── notifier.rs       # Desktop notifications via child process, start/stop split, click-to-open artifact
-├── installer.rs      # Platform-specific auto-start (launchd/systemd/Windows)
+├── notifier.rs       # Notification formatting, subprocess fallback for boo run, open_file/open_terminal_resume
+├── notification_service.rs  # Daemon notification thread: CFRunLoop + user-notify manager, click/reply callbacks
+├── installer.rs      # Platform-specific auto-start (launchd/systemd/Windows), .app bundles, URL scheme
 ├── error.rs          # Error types
-└── lib.rs            # Module re-exports
+└── lib.rs            # Module re-exports, shared strip_ansi
 
 tests/
 └── cli.rs            # End-to-end CLI integration tests (assert_cmd)
@@ -43,8 +44,11 @@ tests/
 - **Separate stdout/stderr**: stdout = response, stderr = chrome. `.response` file is ANSI-stripped stdout
 - **Clock trait**: Enables deterministic testing with MockClock
 - **Coalesced missed runs**: Fire once with `missed_count` metadata (capped at 1000)
-- **Notification via child process**: macOS suppresses notifications from backgrounded processes. Daemon spawns `boo internal-notify` as child
-- **Clickable notifications**: `--open` arg on internal-notify opens artifact file via system handler
+- **Daemon-direct notifications**: Daemon sends notifications from main thread (CFRunLoop) for reliable click/reply callbacks. `boo run` falls back to subprocess
+- **Clickable notifications**: Click opens artifact file; inline reply opens terminal with `boo resume`
+- **Runner trait**: Extensible execution — KiroRunner (kiro-cli), ShellRunner (raw commands), future CLIs add a trait impl
+- **URL scheme**: `boo://` deep links handled by BooURL.app (Swift, compiled at install time)
+- **BOO_JOB_NAME env var**: Set on spawned kiro-cli so agents know which job they're running as
 - **Batched start notifications**: Multiple jobs firing in same tick get one grouped notification
 - **Retry with delay**: Configurable retry count and delay per job, each attempt logged
 - **Delete-after-run**: One-shot `--at` jobs auto-remove after success
