@@ -161,7 +161,6 @@ pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, working_dir:
 
 /// Open a terminal and run `boo resume`. Used by notification reply and URL scheme.
 pub fn open_terminal_resume(_working_dir: &str, job_name: &str, prompt: Option<&str>, previous: bool) {
-    let config = crate::config::Config::load();
     let boo_bin = std::env::current_exe().unwrap_or_else(|_| "boo".into());
     let boo = boo_bin.to_string_lossy();
 
@@ -173,6 +172,7 @@ pub fn open_terminal_resume(_working_dir: &str, job_name: &str, prompt: Option<&
 
     #[cfg(target_os = "macos")]
     {
+        let config = crate::config::Config::load();
         let terminal = config.terminal.as_deref().unwrap_or_else(|| {
             for app in ["iTerm", "Ghostty", "Alacritty", "kitty", "WezTerm"] {
                 if std::path::Path::new(&format!("/Applications/{app}.app")).exists() {
