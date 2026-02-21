@@ -158,8 +158,8 @@ impl<C: Clock + 'static> Scheduler<C> {
         let from_time = job.last_run.unwrap_or(job.created_at);
 
         // Compute scheduled_for based on schedule type
-        let scheduled_for = if job.at_time.is_some() {
-            job.at_time.unwrap()
+        let scheduled_for = if let Some(at) = job.at_time {
+            at
         } else if let Some(every_secs) = job.every_secs {
             from_time + chrono::Duration::seconds(every_secs as i64)
         } else {

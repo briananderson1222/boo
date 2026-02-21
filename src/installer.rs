@@ -1,4 +1,6 @@
+#[cfg(target_os = "macos")]
 use crate::config::boo_dir;
+#[allow(unused_imports)]
 use crate::error::{BooError, Result};
 use std::path::PathBuf;
 use std::process::Command;

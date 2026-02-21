@@ -174,7 +174,7 @@ pub fn open_terminal_resume(_working_dir: &str, job_name: &str, prompt: Option<&
     #[cfg(target_os = "macos")]
     {
         let terminal = config.terminal.as_deref().unwrap_or_else(|| {
-            for app in &["iTerm", "Ghostty", "Alacritty", "kitty", "WezTerm"] {
+            for app in ["iTerm", "Ghostty", "Alacritty", "kitty", "WezTerm"] {
                 if std::path::Path::new(&format!("/Applications/{app}.app")).exists() {
                     return app;
                 }
