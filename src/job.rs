@@ -41,6 +41,12 @@ pub struct Job {
     /// Send a start notification when this job begins.
     #[serde(default)]
     pub notify_start: bool,
+    /// Runner type: "kiro" (default), "shell", or future CLI names.
+    #[serde(default)]
+    pub runner: Option<String>,
+    /// Raw shell command (shortcut for runner=shell). Mutually exclusive with prompt for shell jobs.
+    #[serde(default)]
+    pub command: Option<String>,
 }
 
 fn default_retry_delay() -> u64 {
@@ -90,6 +96,8 @@ impl Job {
             retry_count: 0,
             retry_delay_secs: default_retry_delay(),
             notify_start: false,
+            runner: None,
+            command: None,
         }
     }
 

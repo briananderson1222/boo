@@ -22,6 +22,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// Start the scheduler daemon
     Daemon,
@@ -39,7 +40,10 @@ enum Commands {
         #[arg(long, group = "schedule")]
         every: Option<String>,
         #[arg(long)]
-        prompt: String,
+        prompt: Option<String>,
+        /// Raw shell command (shortcut for --runner shell)
+        #[arg(long, conflicts_with = "prompt")]
+        command: Option<String>,
         #[arg(long)]
         dir: Option<PathBuf>,
         #[arg(long)]
@@ -65,6 +69,9 @@ enum Commands {
         /// Send a start notification when this job begins
         #[arg(long)]
         notify_start: bool,
+        /// Runner type: kiro (default), shell, or future CLI names
+        #[arg(long)]
+        runner: Option<String>,
     },
     /// Remove a job by ID or name
     Remove {
@@ -244,10 +251,10 @@ fn urldecode(s: &str) -> String {
 async fn run(cli: Cli) -> boo::error::Result<()> {
     match cli.command {
         Commands::Daemon => cmd_daemon().await,
-        Commands::Add { name, cron, at, every, prompt, dir, agent, model, timeout,
-                        timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start } =>
-            cmd_add(name, cron, at, every, prompt, dir, agent, model, timeout,
-                    timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start).await,
+        Commands::Add { name, cron, at, every, prompt, command, dir, agent, model, timeout,
+                        timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, runner } =>
+            cmd_add(name, cron, at, every, prompt, command, dir, agent, model, timeout,
+                    timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, runner).await,
         Commands::Remove { target, delete_logs, keep_logs } => cmd_remove(&target, delete_logs, keep_logs),
         Commands::List { format } => cmd_list(&format),
         Commands::Enable { target } => cmd_set_enabled(&target, true),
@@ -332,10 +339,16 @@ async fn cmd_run(target: &str, no_notify: bool) -> boo::error::Result<()> {
 #[allow(clippy::too_many_arguments)]
 async fn cmd_add(
     name: String, cron: Option<String>, at: Option<String>, every: Option<String>,
-    prompt: String, dir: Option<PathBuf>, agent: Option<String>, model: Option<String>,
+    prompt: Option<String>, command: Option<String>, dir: Option<PathBuf>, agent: Option<String>, model: Option<String>,
     timeout: Option<u64>, timezone: Option<String>, delete_after_run: bool,
     open_artifact: Option<String>, retry: u32, retry_delay: u64, notify_start: bool,
+    runner: Option<String>,
 ) -> boo::error::Result<()> {
+    // Require prompt or command
+    if prompt.is_none() && command.is_none() {
+        return Err(boo::error::BooError::Other("Must specify --prompt or --command".into()));
+    }
+
     // Require exactly one schedule type
     let schedule_count = cron.is_some() as u8 + at.is_some() as u8 + every.is_some() as u8;
     if schedule_count == 0 {
@@ -359,7 +372,8 @@ async fn cmd_add(
             "Job with name '{}' already exists", name)));
     }
 
-    let mut job = Job::new(&name, "", &prompt, dir);
+    let prompt_str = prompt.as_deref().or(command.as_deref()).unwrap_or("");
+    let mut job = Job::new(&name, "", prompt_str, dir);
     job.agent = agent;
     job.model = model;
     job.timeout_secs = timeout;
@@ -369,6 +383,8 @@ async fn cmd_add(
     job.retry_count = retry;
     job.retry_delay_secs = retry_delay;
     job.notify_start = notify_start;
+    job.runner = if command.is_some() && runner.is_none() { Some("shell".into()) } else { runner };
+    job.command = command;
 
     if let Some(cron_str) = cron {
         cron_eval::next_occurrence(&cron_str, Utc::now())?;
