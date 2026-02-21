@@ -11,6 +11,8 @@ cargo build --release
 cp target/release/boo /usr/local/bin/
 ```
 
+> **Note:** After building a new version, re-run `boo install` to update the `.app` bundles used for notifications and URL scheme handling.
+
 ## Quick Start
 
 ```bash
@@ -81,7 +83,7 @@ boo add --name "calendar-check" \
 | `boo logs <name\|id>` | Show run history |
 | `boo logs <name\|id> --output` | Print the clean response from the most recent run |
 | `boo resume [name\|id]` | Resume an interactive kiro-cli session to follow up |
-| `boo install` | Register as auto-start service |
+| `boo install` | Register as auto-start service (re-run after building new version) |
 | `boo uninstall` | Remove auto-start service |
 
 ### Job Options
