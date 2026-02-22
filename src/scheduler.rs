@@ -112,18 +112,36 @@ impl<C: Clock + 'static> Scheduler<C> {
         tokio::spawn(async move {
             { running_jobs.lock().await.insert(job.id); }
 
-            let result = Self::execute_with_retry(job.clone(), config, store_dir, clock, sender.clone()).await;
+            let result = Self::execute_with_retry(job.clone(), config, store_dir.clone(), clock, sender.clone()).await;
             if let Err(e) = &result {
-                eprintln!("Job execution failed for {}: {e}", job.name);
+                let retries = job.retry_count;
+                let msg = if retries > 0 {
+                    format!("{} (after {} retries)", e, retries)
+                } else {
+                    e.to_string()
+                };
+                eprintln!("Job execution failed for {}: {msg}", job.name);
+
+                // Find latest log file for click-to-open
+                let log_dir = store_dir.as_ref()
+                    .map(|d| d.join("runs"))
+                    .unwrap_or_else(crate::config::runs_dir)
+                    .join(job.id.to_string());
+                let latest_log = std::fs::read_dir(&log_dir).ok()
+                    .and_then(|entries| entries.filter_map(|e| e.ok())
+                        .filter(|e| e.path().extension().is_some_and(|ext| ext == "log"))
+                        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok()))
+                    .map(|e| e.path().to_string_lossy().to_string());
+
                 if let Some(ref s) = sender {
                     s.send(NotifyRequest {
-                        summary: format!("✗ Job '{}' error", job.name),
-                        body: e.to_string(),
-                        open: None,
+                        summary: format!("✗ Job '{}' failed", job.name),
+                        body: msg,
+                        open: latest_log,
                         working_dir: Some(job.working_dir.to_string_lossy().to_string()),
                     });
                 } else {
-                    notifier::notify_error(&job, &e.to_string());
+                    notifier::notify_error(&job, &msg);
                 }
             }
 
