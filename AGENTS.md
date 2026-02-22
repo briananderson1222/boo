@@ -98,6 +98,7 @@ Dev dependencies: `proptest`, `tempfile`, `assert_cmd`, `predicates`
 - **DRY**: consolidate shared logic into `lib.rs` or shared functions. Check for existing implementations before writing new code. If similar logic exists in multiple places, refactor into a single source of truth.
 - **Every code change must include corresponding tests.** No exceptions. If a feature is added or a bug is fixed, a test proving it works must accompany the change.
 - **Version bump after release**: After tagging a release, immediately bump `Cargo.toml` version to the next minor (e.g. 0.2.0 → 0.3.0) so the working tree always reflects in-progress work.
+- **Changelog**: Update `CHANGELOG.md` when tagging a release. The annotated tag message should match the changelog entry. GitHub release notes are populated from the tag message.
 
 ## Maintaining This File
 
