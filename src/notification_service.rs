@@ -68,17 +68,17 @@ fn run_notification_loop(rx: mpsc::Receiver<NotifyRequest>) {
             match &response.action {
                 NotificationResponseAction::Default => {
                     if let Some(path) = &open_path {
-                        crate::notifier::open_file_pub(path);
+                        crate::notifier::open_file(path);
                     }
                 }
                 NotificationResponseAction::Other(id) if id == "reply" => {
-                    if let (Some(text), Some(dir)) = (&response.user_text, &work_dir) {
+                    if let (Some(text), Some(_)) = (&response.user_text, &work_dir) {
                         let text = text.trim();
                         if !text.is_empty() {
                             let job_name = response.user_info.get("job_name")
                                 .cloned()
                                 .unwrap_or_default();
-                            crate::notifier::open_terminal_resume(dir, &job_name, Some(text), false);
+                            crate::notifier::open_terminal_resume(&job_name, Some(text), false);
                         }
                     }
                 }

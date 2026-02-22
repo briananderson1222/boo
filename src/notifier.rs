@@ -56,7 +56,7 @@ pub fn notify_error(job: &Job, error: &str) {
     spawn_notify(&summary, error, None, Some(&job.working_dir.to_string_lossy()), Some(&job.name));
 }
 
-/// Send a batched start notification for multiple jobs.
+/// Send a start notification for one or more jobs.
 pub fn notify_start(job_names: &[&str]) {
     let (summary, body) = if job_names.len() == 1 {
         (format!("🚀 Job '{}' starting...", job_names[0]),
@@ -102,7 +102,7 @@ fn spawn_notify(summary: &str, body: &str, open: Option<&str>, working_dir: Opti
 }
 
 /// Called by the hidden `internal-notify` subcommand. Runs on the main thread (required for macOS).
-pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, working_dir: Option<&str>, job_name: Option<&str>) {
+pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, _working_dir: Option<&str>, job_name: Option<&str>) {
     use user_notify::{NotificationBuilder, NotificationCategory, NotificationCategoryAction, NotificationResponseAction};
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -118,7 +118,6 @@ pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, working_dir:
 
     // Set up click + inline reply callback
     let open_path = open.map(|s| s.to_string());
-    let work_dir = working_dir.map(|s| s.to_string());
     let name = job_name.map(|s| s.to_string());
     let (tx, rx) = std::sync::mpsc::channel::<()>();
 
@@ -135,7 +134,7 @@ pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, working_dir:
                         let text = text.trim();
                         if !text.is_empty() {
                             if let Some(ref n) = name {
-                                open_terminal_resume(work_dir.as_deref().unwrap_or(""), n, Some(text), false);
+                                open_terminal_resume(n, Some(text), false);
                             }
                         }
                     }
@@ -196,7 +195,7 @@ pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, working_dir:
 }
 
 /// Open a terminal and run `boo resume`. Used by notification reply and URL scheme.
-pub fn open_terminal_resume(_working_dir: &str, job_name: &str, prompt: Option<&str>, previous: bool) {
+pub fn open_terminal_resume(job_name: &str, prompt: Option<&str>, previous: bool) {
     let boo_bin = std::env::current_exe().unwrap_or_else(|_| "boo".into());
     let boo = boo_bin.to_string_lossy();
 
@@ -248,11 +247,7 @@ pub fn open_terminal_resume(_working_dir: &str, job_name: &str, prompt: Option<&
 }
 
 /// Open a file with the system default handler.
-pub fn open_file_pub(path: &str) {
-    open_file(path);
-}
-
-fn open_file(path: &str) {
+pub fn open_file(path: &str) {
     let path = std::path::Path::new(path);
     if !path.exists() { return; }
 

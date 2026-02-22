@@ -181,7 +181,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn test_job() -> Job {
-        Job::new("test", "0 0 * * *", "echo hello", PathBuf::from("/tmp"))
+        Job::new("test", "0 0 * * *", "echo hello", std::env::temp_dir())
     }
 
     #[test]
@@ -295,7 +295,7 @@ mod tests {
         fn prop_add_then_get(name in "[a-zA-Z0-9_-]{1,20}") {
             let dir = tempdir().unwrap();
             let store = JobStore::with_dir(dir.path().to_path_buf()).unwrap();
-            let job = Job::new(name, "0 0 * * *", "test", PathBuf::from("/tmp"));
+            let job = Job::new(name, "0 0 * * *", "test", std::env::temp_dir());
             let id = job.id;
             store.add_job(job.clone()).unwrap();
             prop_assert_eq!(job, store.get_job(id).unwrap());
@@ -305,7 +305,7 @@ mod tests {
         fn prop_remove_then_get(name in "[a-zA-Z0-9_-]{1,20}") {
             let dir = tempdir().unwrap();
             let store = JobStore::with_dir(dir.path().to_path_buf()).unwrap();
-            let job = Job::new(name, "0 0 * * *", "test", PathBuf::from("/tmp"));
+            let job = Job::new(name, "0 0 * * *", "test", std::env::temp_dir());
             let id = job.id;
             store.add_job(job).unwrap();
             store.remove_job(id).unwrap();
@@ -315,7 +315,7 @@ mod tests {
         #[test]
         fn prop_persistence(name in "[a-zA-Z0-9_-]{1,20}") {
             let dir = tempdir().unwrap();
-            let job = Job::new(name, "0 0 * * *", "test", PathBuf::from("/tmp"));
+            let job = Job::new(name, "0 0 * * *", "test", std::env::temp_dir());
             let id = job.id;
             { JobStore::with_dir(dir.path().to_path_buf()).unwrap().add_job(job.clone()).unwrap(); }
             prop_assert_eq!(job, JobStore::with_dir(dir.path().to_path_buf()).unwrap().get_job(id).unwrap());
@@ -326,7 +326,7 @@ mod tests {
             let dir = tempdir().unwrap();
             let store = JobStore::with_dir(dir.path().to_path_buf()).unwrap();
             for name in &names {
-                store.add_job(Job::new(name.clone(), "0 0 * * *", "test", PathBuf::from("/tmp"))).unwrap();
+                store.add_job(Job::new(name.clone(), "0 0 * * *", "test", std::env::temp_dir())).unwrap();
             }
             prop_assert_eq!(store.load_jobs().unwrap().len(), names.len());
         }
@@ -335,8 +335,8 @@ mod tests {
         fn prop_update_preserves(n1 in "[a-zA-Z0-9_-]{1,20}", n2 in "[a-zA-Z0-9_-]{1,20}") {
             let dir = tempdir().unwrap();
             let store = JobStore::with_dir(dir.path().to_path_buf()).unwrap();
-            let j1 = Job::new(n1, "0 0 * * *", "t1", PathBuf::from("/tmp"));
-            let j2 = Job::new(n2, "0 0 * * *", "t2", PathBuf::from("/tmp"));
+            let j1 = Job::new(n1, "0 0 * * *", "t1", std::env::temp_dir());
+            let j2 = Job::new(n2, "0 0 * * *", "t2", std::env::temp_dir());
             store.add_job(j1.clone()).unwrap();
             store.add_job(j2.clone()).unwrap();
             let mut u1 = j1; u1.name = "updated".into();

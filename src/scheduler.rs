@@ -284,14 +284,8 @@ mod tests {
     use tempfile::TempDir;
 
     fn test_config() -> Config {
-            Config {
-                kiro_cli_path: "echo".to_string(),
-                default_timeout_secs: 5,
-                max_log_runs: 10,
-                heartbeat_secs: 60,
-                terminal: None,
-            }
-        }
+        crate::test_helpers::test_config()
+    }
 
     #[test]
     fn test_scheduler_construction() {

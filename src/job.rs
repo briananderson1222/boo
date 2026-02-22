@@ -152,7 +152,7 @@ mod tests {
 
         #[test]
         fn job_new_defaults(name in "\\PC*") {
-            let job = Job::new(name, "* * * * *", "test", PathBuf::from("/tmp"));
+            let job = Job::new(name, "* * * * *", "test", std::env::temp_dir());
             prop_assert!(job.enabled);
             prop_assert!(!job.allow_overlap);
             prop_assert!(!job.delete_after_run);

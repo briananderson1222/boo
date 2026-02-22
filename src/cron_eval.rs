@@ -79,7 +79,7 @@ mod tests {
     }
 
     fn make_job(cron: &str) -> Job {
-        Job::new("test", cron, "test", PathBuf::from("/tmp"))
+        Job::new("test", cron, "test", std::env::temp_dir())
     }
 
     #[test]

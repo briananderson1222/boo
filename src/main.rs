@@ -207,9 +207,8 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
             // URL scheme launches without a terminal — need to open one
             if let Some(t) = target {
                 let store = JobStore::new()?;
-                let job = resolve_job(&store, t)?;
-                let dir = job.working_dir.to_string_lossy().to_string();
-                boo::notifier::open_terminal_resume(&dir, t, prompt, previous);
+                let _ = resolve_job(&store, t)?; // validate job exists
+                boo::notifier::open_terminal_resume(t, prompt, previous);
                 Ok(())
             } else {
                 cmd_resume(target, prompt, previous)
