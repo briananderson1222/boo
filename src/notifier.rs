@@ -33,7 +33,14 @@ pub fn send_notification(job: &Job, result: &ExecutionResult, sender: &Option<No
         .map(|r| r.trim_start_matches(['>', ' ', '\n']).chars().take(200).collect::<String>())
         .unwrap_or_default();
     let open_path = job.open_artifact.as_ref()
-        .and_then(|a| job::resolve_artifact(&job.working_dir, a));
+        .and_then(|a| job::resolve_artifact(&job.working_dir, a))
+        .or_else(|| {
+            if !result.success && result.output_path.exists() {
+                Some(result.output_path.clone())
+            } else {
+                None
+            }
+        });
 
     if let Some(s) = sender {
         s.send(NotifyRequest {
