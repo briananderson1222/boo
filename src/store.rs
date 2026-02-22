@@ -66,10 +66,6 @@ impl JobStore {
         self.with_lock(|| self.read_jobs_unlocked())
     }
 
-    pub fn save_jobs(&self, jobs: &[Job]) -> Result<()> {
-        self.with_lock(|| self.write_jobs_unlocked(jobs))
-    }
-
     /// Atomic add: single lock for read + write.
     pub fn add_job(&self, job: Job) -> Result<()> {
         self.with_lock(|| {
@@ -150,6 +146,14 @@ impl JobStore {
             .collect::<std::io::Result<Vec<_>>>()?;
         if lines.len() <= max_runs {
             return Ok(());
+        }
+        // Delete output files referenced by the records we're about to drop
+        let drop_lines = &lines[..lines.len() - max_runs];
+        for line in drop_lines {
+            if let Ok(record) = serde_json::from_str::<crate::job::RunRecord>(line) {
+                let _ = std::fs::remove_file(&record.output_path);
+                let _ = std::fs::remove_file(record.output_path.with_extension("response"));
+            }
         }
         let keep = &lines[lines.len() - max_runs..];
         let content = keep.join("\n") + "\n";

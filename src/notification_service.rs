@@ -6,6 +6,7 @@ pub struct NotifyRequest {
     pub body: String,
     pub open: Option<String>,
     pub working_dir: Option<String>,
+    pub job_name: Option<String>,
 }
 
 /// Handle to send notification requests to the notification thread.
@@ -74,9 +75,8 @@ fn run_notification_loop(rx: mpsc::Receiver<NotifyRequest>) {
                     if let (Some(text), Some(dir)) = (&response.user_text, &work_dir) {
                         let text = text.trim();
                         if !text.is_empty() {
-                            let job_name = std::path::Path::new(dir)
-                                .file_name()
-                                .map(|n| n.to_string_lossy().to_string())
+                            let job_name = response.user_info.get("job_name")
+                                .cloned()
                                 .unwrap_or_default();
                             crate::notifier::open_terminal_resume(dir, &job_name, Some(text), false);
                         }
@@ -110,6 +110,7 @@ fn run_notification_loop(rx: mpsc::Receiver<NotifyRequest>) {
                 let mut user_info = std::collections::HashMap::new();
                 if let Some(ref path) = req.open { user_info.insert("open".into(), path.clone()); }
                 if let Some(ref dir) = req.working_dir { user_info.insert("working_dir".into(), dir.clone()); }
+                if let Some(ref name) = req.job_name { user_info.insert("job_name".into(), name.clone()); }
                 let n = NotificationBuilder::new()
                     .title(&req.summary)
                     .body(&req.body)
@@ -123,10 +124,15 @@ fn run_notification_loop(rx: mpsc::Receiver<NotifyRequest>) {
     #[cfg(not(target_os = "macos"))]
     {
         while let Ok(req) = rx.recv() {
+            let mut user_info = std::collections::HashMap::new();
+            if let Some(ref path) = req.open { user_info.insert("open".into(), path.clone()); }
+            if let Some(ref dir) = req.working_dir { user_info.insert("working_dir".into(), dir.clone()); }
+            if let Some(ref name) = req.job_name { user_info.insert("job_name".into(), name.clone()); }
             let n = NotificationBuilder::new()
                 .title(&req.summary)
                 .body(&req.body)
-                .set_category_id("boo-job");
+                .set_category_id("boo-job")
+                .set_user_info(user_info);
             let _ = rt.block_on(manager.send_notification(n));
         }
     }

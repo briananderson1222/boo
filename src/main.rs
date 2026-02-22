@@ -137,6 +137,9 @@ enum Commands {
         /// Working directory for inline reply resume
         #[arg(long)]
         working_dir: Option<String>,
+        /// Job name for inline reply resume
+        #[arg(long)]
+        job_name: Option<String>,
     },
 }
 
@@ -155,8 +158,8 @@ fn main() {
     let cli = Cli::parse();
 
     // Handle notification subprocess on main thread (required for macOS notification delegate)
-    if let Commands::_Notify { summary, body, open, working_dir } = cli.command {
-        boo::notifier::send_and_exit(&summary, &body, open.as_deref(), working_dir.as_deref());
+    if let Commands::_Notify { summary, body, open, working_dir, job_name } = cli.command {
+        boo::notifier::send_and_exit(&summary, &body, open.as_deref(), working_dir.as_deref(), job_name.as_deref());
         return;
     }
 
@@ -239,22 +242,22 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
 }
 
 fn urldecode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
+    let mut bytes = Vec::with_capacity(s.len());
     let mut chars = s.bytes();
     while let Some(b) = chars.next() {
         if b == b'%' {
             let hi = chars.next().and_then(|c| (c as char).to_digit(16));
             let lo = chars.next().and_then(|c| (c as char).to_digit(16));
             if let (Some(h), Some(l)) = (hi, lo) {
-                out.push((h * 16 + l) as u8 as char);
+                bytes.push((h * 16 + l) as u8);
             }
         } else if b == b'+' {
-            out.push(' ');
+            bytes.push(b' ');
         } else {
-            out.push(b as char);
+            bytes.push(b);
         }
     }
-    out
+    String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
 async fn run(cli: Cli) -> boo::error::Result<()> {
@@ -396,7 +399,7 @@ async fn cmd_add(
             "Job with name '{}' already exists", name)));
     }
 
-    let prompt_str = prompt.as_deref().or(command.as_deref()).unwrap_or("");
+    let prompt_str = prompt.as_deref().unwrap_or("");
     let mut job = Job::new(&name, "", prompt_str, dir);
     job.agent = agent;
     job.model = model;
@@ -496,8 +499,13 @@ fn cmd_list(format: &str) -> boo::error::Result<()> {
         "csv" => {
             println!("id,name,schedule,enabled,next_fire,last_run,artifact,artifact_file,working_dir");
             for r in &rows {
+                fn csv(s: &str) -> String {
+                    if s.contains(',') || s.contains('"') || s.contains('\n') {
+                        format!("\"{}\"", s.replace('"', "\"\""))
+                    } else { s.to_string() }
+                }
                 println!("{},{},{},{},{},{},{},{},{}",
-                    r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7.as_deref().unwrap_or(""), r.8);
+                    csv(&r.0), csv(&r.1), csv(&r.2), csv(&r.3), csv(&r.4), csv(&r.5), csv(&r.6), csv(r.7.as_deref().unwrap_or("")), csv(&r.8));
             }
         }
         _ => {
@@ -725,5 +733,5 @@ fn is_daemon_running(pid_path: &std::path::Path) -> bool {
     #[cfg(unix)]
     { unsafe { libc::kill(pid, 0) == 0 } }
     #[cfg(not(unix))]
-    { true }
+    { false }
 }

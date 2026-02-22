@@ -4,8 +4,8 @@ use croner::Cron;
 
 /// Parse and return next cron occurrence after `from`.
 pub fn next_occurrence(cron_expr: &str, from: DateTime<Utc>) -> crate::error::Result<DateTime<Utc>> {
-    let cron = Cron::new(cron_expr).parse()
-        .map_err(|e| crate::error::BooError::CronParse(e.to_string()))?;
+    let cron: Cron = cron_expr.parse()
+        .map_err(|e: croner::errors::CronError| crate::error::BooError::CronParse(e.to_string()))?;
     cron.find_next_occurrence(&from, false)
         .map_err(|e| crate::error::BooError::CronParse(e.to_string()))
 }

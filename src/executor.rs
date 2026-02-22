@@ -147,50 +147,6 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
     }
 }
 
-/// Execute a job and print output to terminal (for `boo run` command)
-pub async fn execute_job_interactive(job: &Job, config: &Config) -> Result<ExecutionResult> {
-    let runner = get_runner(job);
-    let start = Instant::now();
-    let timeout_secs = job.timeout_secs.unwrap_or(config.default_timeout_secs);
-
-    let mut cmd = runner.build_command(job, config);
-    cmd.stdin(Stdio::piped());
-
-    let mut child = cmd.spawn().map_err(BooError::Io)?;
-
-    if let Some(bytes) = runner.stdin_bytes(job) {
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(&bytes).await;
-            drop(stdin);
-        }
-    } else {
-        drop(child.stdin.take());
-    }
-
-    let result = tokio::time::timeout(Duration::from_secs(timeout_secs), async {
-        let status = child.wait().await.map_err(BooError::Io)?;
-        Ok::<_, BooError>((status.code(), status.success()))
-    })
-    .await;
-
-    let duration_secs = start.elapsed().as_secs_f64();
-
-    match result {
-        Ok(Ok((exit_code, success))) => Ok(ExecutionResult {
-            exit_code,
-            success,
-            duration_secs,
-            output_path: PathBuf::new(),
-            response: None,
-        }),
-        Ok(Err(e)) => Err(e),
-        Err(_) => {
-            let _ = child.kill().await;
-            Err(BooError::JobTimeout(timeout_secs))
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

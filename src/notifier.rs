@@ -2,36 +2,31 @@ use crate::executor::ExecutionResult;
 use crate::job::{self, Job};
 use crate::notification_service::{NotificationSender, NotifyRequest};
 
-/// Send a completion/failure notification. Optionally opens an artifact on click.
-pub fn notify(job: &Job, result: &ExecutionResult) {
+/// Build summary and body strings for a job result notification.
+fn format_notification(job: &Job, result: &ExecutionResult) -> (String, String) {
     let summary = if result.success {
         format!("✓ Job '{}' completed ({:.1}s)", job.name, result.duration_secs)
     } else {
         let code = result.exit_code.map(|c| format!("exit {c}")).unwrap_or("killed".into());
         format!("✗ Job '{}' failed ({}, {:.1}s)", job.name, code, result.duration_secs)
     };
-
     let body = result.response.as_deref()
         .map(|r| r.trim_start_matches(['>', ' ', '\n']).chars().take(200).collect::<String>())
         .unwrap_or_default();
+    (summary, body)
+}
 
+/// Send a completion/failure notification. Optionally opens an artifact on click.
+pub fn notify(job: &Job, result: &ExecutionResult) {
+    let (summary, body) = format_notification(job, result);
     let open_path = job.open_artifact.as_ref()
         .and_then(|a| job::resolve_artifact(&job.working_dir, a));
-
-    spawn_notify(&summary, &body, open_path.as_ref().map(|p| p.to_string_lossy().as_ref().to_owned()).as_deref(), Some(&job.working_dir.to_string_lossy()));
+    spawn_notify(&summary, &body, open_path.as_ref().map(|p| p.to_string_lossy().as_ref().to_owned()).as_deref(), Some(&job.working_dir.to_string_lossy()), Some(&job.name));
 }
 
 /// Send a notification using the daemon's sender if available, otherwise subprocess.
 pub fn send_notification(job: &Job, result: &ExecutionResult, sender: &Option<NotificationSender>) {
-    let summary = if result.success {
-        format!("✓ Job '{}' completed ({:.1}s)", job.name, result.duration_secs)
-    } else {
-        let code = result.exit_code.map(|c| format!("exit {c}")).unwrap_or("killed".into());
-        format!("✗ Job '{}' failed ({}, {:.1}s)", job.name, code, result.duration_secs)
-    };
-    let body = result.response.as_deref()
-        .map(|r| r.trim_start_matches(['>', ' ', '\n']).chars().take(200).collect::<String>())
-        .unwrap_or_default();
+    let (summary, body) = format_notification(job, result);
     let open_path = job.open_artifact.as_ref()
         .and_then(|a| job::resolve_artifact(&job.working_dir, a))
         .or_else(|| {
@@ -48,16 +43,17 @@ pub fn send_notification(job: &Job, result: &ExecutionResult, sender: &Option<No
             body,
             open: open_path.map(|p| p.to_string_lossy().to_string()),
             working_dir: Some(job.working_dir.to_string_lossy().to_string()),
+            job_name: Some(job.name.clone()),
         });
     } else {
-        spawn_notify(&summary, &body, open_path.as_ref().map(|p| p.to_string_lossy().as_ref().to_owned()).as_deref(), Some(&job.working_dir.to_string_lossy()));
+        spawn_notify(&summary, &body, open_path.as_ref().map(|p| p.to_string_lossy().as_ref().to_owned()).as_deref(), Some(&job.working_dir.to_string_lossy()), Some(&job.name));
     }
 }
 
 /// Send an error/timeout notification for a job.
 pub fn notify_error(job: &Job, error: &str) {
     let summary = format!("✗ Job '{}' error", job.name);
-    spawn_notify(&summary, error, None, Some(&job.working_dir.to_string_lossy()));
+    spawn_notify(&summary, error, None, Some(&job.working_dir.to_string_lossy()), Some(&job.name));
 }
 
 /// Send a batched start notification for multiple jobs.
@@ -69,11 +65,11 @@ pub fn notify_start(job_names: &[&str]) {
         (format!("🚀 {} jobs starting", job_names.len()),
          job_names.join(", "))
     };
-    spawn_notify(&summary, &body, None, None);
+    spawn_notify(&summary, &body, None, None, None);
 }
 
 /// Spawn the internal-notify child process.
-fn spawn_notify(summary: &str, body: &str, open: Option<&str>, working_dir: Option<&str>) {
+fn spawn_notify(summary: &str, body: &str, open: Option<&str>, working_dir: Option<&str>, job_name: Option<&str>) {
     if cfg!(test) || std::env::var_os("BOO_NO_NOTIFY").is_some() { return; }
 
     // Prefer the .app bundle binary (required for native notifications on macOS)
@@ -99,11 +95,14 @@ fn spawn_notify(summary: &str, body: &str, open: Option<&str>, working_dir: Opti
     if let Some(dir) = working_dir {
         cmd.args(["--working-dir", dir]);
     }
+    if let Some(name) = job_name {
+        cmd.args(["--job-name", name]);
+    }
     let _ = cmd.spawn();
 }
 
 /// Called by the hidden `internal-notify` subcommand. Runs on the main thread (required for macOS).
-pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, working_dir: Option<&str>) {
+pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, working_dir: Option<&str>, job_name: Option<&str>) {
     use user_notify::{NotificationBuilder, NotificationCategory, NotificationCategoryAction, NotificationResponseAction};
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -120,6 +119,7 @@ pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, working_dir:
     // Set up click + inline reply callback
     let open_path = open.map(|s| s.to_string());
     let work_dir = working_dir.map(|s| s.to_string());
+    let name = job_name.map(|s| s.to_string());
     let (tx, rx) = std::sync::mpsc::channel::<()>();
 
     let _ = manager.register(
@@ -131,10 +131,12 @@ pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, working_dir:
                     }
                 }
                 NotificationResponseAction::Other(id) if id == "reply" => {
-                    if let (Some(text), Some(ref dir)) = (&response.user_text, &work_dir) {
+                    if let Some(text) = &response.user_text {
                         let text = text.trim();
                         if !text.is_empty() {
-                            resume_with_prompt(dir, text);
+                            if let Some(ref n) = name {
+                                open_terminal_resume(work_dir.as_deref().unwrap_or(""), n, Some(text), false);
+                            }
                         }
                     }
                 }
@@ -243,15 +245,6 @@ pub fn open_terminal_resume(_working_dir: &str, job_name: &str, prompt: Option<&
     {
         let _ = std::process::Command::new("cmd").args(["/C", "start", "cmd", "/K", &args]).spawn();
     }
-}
-
-/// Open a terminal and run `boo resume` with the reply prompt (notification callback).
-fn resume_with_prompt(working_dir: &str, prompt: &str) {
-    let job_name = std::path::Path::new(working_dir)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-    open_terminal_resume(working_dir, &job_name, Some(prompt), false);
 }
 
 /// Open a file with the system default handler.

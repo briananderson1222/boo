@@ -78,7 +78,7 @@ impl<C: Clock + 'static> Scheduler<C> {
             to_fire.push(job);
         }
 
-        // Batched start notification for jobs with notify_start
+        // Send start notifications for jobs with notify_start
         let start_names: Vec<&str> = to_fire.iter()
             .filter(|j| j.notify_start)
             .map(|j| j.name.as_str())
@@ -89,7 +89,7 @@ impl<C: Clock + 'static> Scheduler<C> {
                     sender.send(NotifyRequest {
                         summary: format!("🚀 Job '{}' starting...", name),
                         body: format!("Run 'boo disable {}' to pause", name),
-                        open: None, working_dir: None,
+                        open: None, working_dir: None, job_name: Some(name.to_string()),
                     });
                 }
             } else {
@@ -139,6 +139,7 @@ impl<C: Clock + 'static> Scheduler<C> {
                         body: msg,
                         open: latest_log,
                         working_dir: Some(job.working_dir.to_string_lossy().to_string()),
+                        job_name: Some(job.name.clone()),
                     });
                 } else {
                     notifier::notify_error(&job, &msg);

@@ -124,7 +124,7 @@ Use `boo next "<cron>"` to preview when a cron expression will fire.
 
 ### Heartbeat Pattern
 
-The daemon runs a timer loop (default every 30 seconds). On each tick:
+The daemon runs a timer loop (default every 60 seconds). On each tick:
 
 1. Load all enabled jobs
 2. For each job, check if overdue based on schedule type
@@ -141,7 +141,7 @@ Jobs with `--retry N` will retry up to N times with `--retry-delay` seconds betw
 
 ### Notifications
 
-- **Start notification** (opt-in via `--notify-start`): batched if multiple jobs fire simultaneously
+- **Start notification** (opt-in via `--notify-start`): sent when job begins
 - **Completion notification**: includes response preview, click to open artifact
 - **Failure notification**: includes exit code and retry status
 
@@ -230,7 +230,7 @@ Optional config at `~/.boo/config.json`:
   "kiro_cli_path": "/usr/local/bin/kiro-cli",
   "default_timeout_secs": 300,
   "max_log_runs": 50,
-  "heartbeat_secs": 30,
+  "heartbeat_secs": 60,
   "terminal": "iTerm"
 }
 ```
@@ -266,7 +266,7 @@ Optional config at `~/.boo/config.json`:
 ```bash
 cargo test              # 70 tests (unit, property-based, CLI integration)
 cargo clippy            # Zero warnings
-cargo build --release   # ~3.3MB binary
+cargo build --release   # ~3.5MB binary
 ```
 
 See [AGENTS.md](AGENTS.md) for architecture details and contributor guidance.

@@ -114,7 +114,6 @@ fn install_macos(binary_path: &std::path::Path) -> Result<PathBuf> {
     }
     
     println!("Created Boo.app at {}", app_dir.display());
-    println!("Created BooURL.app for boo:// URL scheme");
     Ok(plist_path)
 }
 

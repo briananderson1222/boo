@@ -1,17 +1,16 @@
 [package]
 name = "boo"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Cross-platform scheduler daemon for kiro-cli prompts"
 
 [dependencies]
-croner = "2"
+croner = "3"
 tokio = { version = "1", features = ["full"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4.5.60", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
-chrono-tz = "0.10"
 uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "6"
 fs2 = "0.4"

@@ -9,7 +9,7 @@ Cross-platform Rust scheduler daemon that fires kiro-cli prompts on cron/at/ever
 1. **Reliable scheduled AI tasks** — cron, one-shot, and interval scheduling that survives sleep/wake, crashes, and reboots
 2. **Cross-platform** — macOS, Linux, Windows from a single Rust binary
 3. **Heartbeat pattern** — inspired by OpenClaw: periodic tick checks overdue jobs, coalesces missed runs
-4. **Minimal footprint** — single ~3.3MB binary, no runtime dependencies, no GUI framework
+4. **Minimal footprint** — single ~3.5MB binary, no runtime dependencies, no GUI framework
 5. **Developer-friendly** — CLI-first management, JSON persistence, property-based testing
 
 ## Architecture
@@ -49,7 +49,7 @@ tests/
 - **Runner trait**: Extensible execution — KiroRunner (kiro-cli), ShellRunner (raw commands), future CLIs add a trait impl
 - **URL scheme**: `boo://` deep links handled by BooURL.app (Swift, compiled at install time)
 - **BOO_JOB_NAME env var**: Set on spawned kiro-cli so agents know which job they're running as
-- **Batched start notifications**: Multiple jobs firing in same tick get one grouped notification
+- **Batched start notifications**: Multiple jobs firing in same tick send individual start notifications (one per job)
 - **Retry with delay**: Configurable retry count and delay per job, each attempt logged
 - **Delete-after-run**: One-shot `--at` jobs auto-remove after success
 - **Per-job workspace directories**: `~/.boo/workspace/<name>/` isolates kiro-cli sessions per job
@@ -58,6 +58,7 @@ tests/
 - **Duplicate job name prevention**: `boo add` rejects duplicates
 - **Working directory validation**: `boo add` verifies dir exists
 - **PID alive check**: `kill(pid, 0)` on Unix
+- **Reserved fields**: `Job.timezone` (stored, not yet used by cron_eval — always UTC) and `Job.allow_overlap` (checked by scheduler, but no CLI flag to enable)
 
 ## Testing Strategy
 
@@ -75,7 +76,7 @@ tests/
 | `tokio` | Async runtime, timers, subprocess |
 | `clap` | CLI argument parsing (derive) |
 | `serde` / `serde_json` | JSON persistence |
-| `chrono` / `chrono-tz` | Time handling |
+| `chrono` | Time handling |
 | `uuid` | Job IDs |
 | `user-notify` | Native desktop notifications (cross-platform) |
 | `glob` | Glob pattern matching for artifact resolution |
@@ -96,6 +97,7 @@ Dev dependencies: `proptest`, `tempfile`, `assert_cmd`, `predicates`
 - No `unwrap()` in production code (only in tests and MockClock mutex access)
 - **DRY**: consolidate shared logic into `lib.rs` or shared functions. Check for existing implementations before writing new code. If similar logic exists in multiple places, refactor into a single source of truth.
 - **Every code change must include corresponding tests.** No exceptions. If a feature is added or a bug is fixed, a test proving it works must accompany the change.
+- **Version bump after release**: After tagging a release, immediately bump `Cargo.toml` version to the next minor (e.g. 0.2.0 → 0.3.0) so the working tree always reflects in-progress work.
 
 ## Maintaining This File
 
