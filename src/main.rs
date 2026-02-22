@@ -733,5 +733,5 @@ fn is_daemon_running(pid_path: &std::path::Path) -> bool {
     #[cfg(unix)]
     { unsafe { libc::kill(pid, 0) == 0 } }
     #[cfg(not(unix))]
-    { false }
+    { let _ = pid; false }
 }
