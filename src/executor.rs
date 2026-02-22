@@ -155,7 +155,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn test_job() -> Job {
-        let mut job = Job::new("test", "* * * * *", "echo hello", PathBuf::from("/tmp"));
+        let mut job = Job::new("test", "* * * * *", "echo hello", std::env::temp_dir());
         job.timezone = Some("UTC".into());
         job.timeout_secs = Some(5);
         job

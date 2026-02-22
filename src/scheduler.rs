@@ -308,7 +308,7 @@ mod tests {
         let dir = tmp.path().to_path_buf();
         let now = Utc::now();
 
-        let mut job = Job::new("fire-test", "* * * * *", "hello", PathBuf::from("/tmp"));
+        let mut job = Job::new("fire-test", "* * * * *", "hello", std::env::temp_dir());
         job.last_run = Some(now - chrono::Duration::minutes(2));
         JobStore::with_dir(dir.clone()).unwrap().add_job(job.clone()).unwrap();
 
@@ -326,7 +326,7 @@ mod tests {
         let dir = tmp.path().to_path_buf();
         let now = Utc::now();
 
-        let mut job = Job::new("every-test", "", "hello", PathBuf::from("/tmp"));
+        let mut job = Job::new("every-test", "", "hello", std::env::temp_dir());
         job.every_secs = Some(60);
         job.last_run = Some(now - chrono::Duration::minutes(2));
         JobStore::with_dir(dir.clone()).unwrap().add_job(job.clone()).unwrap();
@@ -345,7 +345,7 @@ mod tests {
         let dir = tmp.path().to_path_buf();
         let now = Utc::now();
 
-        let mut job = Job::new("at-test", "", "hello", PathBuf::from("/tmp"));
+        let mut job = Job::new("at-test", "", "hello", std::env::temp_dir());
         job.at_time = Some(now - chrono::Duration::minutes(1));
         JobStore::with_dir(dir.clone()).unwrap().add_job(job.clone()).unwrap();
 
@@ -363,7 +363,7 @@ mod tests {
         let dir = tmp.path().to_path_buf();
         let now = Utc::now();
 
-        let mut job = Job::new("skip-test", "0 * * * *", "hello", PathBuf::from("/tmp"));
+        let mut job = Job::new("skip-test", "0 * * * *", "hello", std::env::temp_dir());
         job.last_run = Some(now - chrono::Duration::seconds(30));
         JobStore::with_dir(dir.clone()).unwrap().add_job(job.clone()).unwrap();
 
@@ -381,7 +381,7 @@ mod tests {
         let dir = tmp.path().to_path_buf();
         let now = Utc::now();
 
-        let mut job = Job::new("disabled-test", "* * * * *", "hello", PathBuf::from("/tmp"));
+        let mut job = Job::new("disabled-test", "* * * * *", "hello", std::env::temp_dir());
         job.last_run = Some(now - chrono::Duration::minutes(2));
         job.enabled = false;
         JobStore::with_dir(dir.clone()).unwrap().add_job(job.clone()).unwrap();
@@ -400,7 +400,7 @@ mod tests {
         let dir = tmp.path().to_path_buf();
         let now = Utc::now();
 
-        let mut job = Job::new("delete-test", "", "hello", PathBuf::from("/tmp"));
+        let mut job = Job::new("delete-test", "", "hello", std::env::temp_dir());
         job.at_time = Some(now - chrono::Duration::minutes(1));
         job.delete_after_run = true;
         let job_id = job.id;
