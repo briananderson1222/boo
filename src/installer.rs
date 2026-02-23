@@ -383,6 +383,7 @@ class D:NSObject,NSApplicationDelegate{{func application(_ a:NSApplication,open 
     Ok(())
 }
 pub fn generate_plist(binary_path: &std::path::Path, boo_dir: &std::path::Path) -> String {
+    let home = dirs::home_dir().map(|h| h.to_string_lossy().to_string()).unwrap_or_default();
     format!(r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -405,10 +406,10 @@ pub fn generate_plist(binary_path: &std::path::Path, boo_dir: &std::path::Path) 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:{}/.local/bin</string>
     </dict>
 </dict>
-</plist>"#, binary_path.display(), boo_dir.display(), boo_dir.display())
+</plist>"#, binary_path.display(), boo_dir.display(), boo_dir.display(), home)
 }
 
 pub fn generate_systemd_unit(binary_path: &std::path::Path) -> String {
@@ -442,6 +443,7 @@ mod tests {
         assert!(result.contains("daemon"));
         assert!(result.contains("/Users/test/.boo/daemon.log"));
         assert!(result.contains("/opt/homebrew/bin"));
+        assert!(result.contains(".local/bin"));
     }
 
     #[test]
