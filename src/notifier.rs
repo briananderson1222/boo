@@ -11,7 +11,15 @@ fn format_notification(job: &Job, result: &ExecutionResult) -> (String, String) 
         format!("✗ Job '{}' failed ({}, {:.1}s)", job.name, code, result.duration_secs)
     };
     let body = result.response.as_deref()
-        .map(|r| r.trim_start_matches(['>', ' ', '\n']).chars().take(200).collect::<String>())
+        .map(|r| {
+            // Prefer last "Summary:" line if present, otherwise use last non-empty line
+            let trimmed = r.trim();
+            let last_meaningful = trimmed.lines().rev()
+                .find(|l| l.starts_with("Summary:"))
+                .or_else(|| trimmed.lines().rev().find(|l| !l.trim().is_empty()))
+                .unwrap_or(trimmed);
+            last_meaningful.trim().chars().take(200).collect::<String>()
+        })
         .unwrap_or_default();
     (summary, body)
 }
