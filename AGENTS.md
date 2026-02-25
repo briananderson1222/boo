@@ -95,6 +95,7 @@ Dev dependencies: `proptest`, `tempfile`, `assert_cmd`, `predicates`
 - Errors in spawned job tasks are caught with `eprintln!`, never crash the daemon
 - `&Path` over `&PathBuf` in function signatures
 - No `unwrap()` in production code (only in tests and MockClock mutex access)
+- **Clean warnings before committing**: Run `cargo fix --lib -p boo --tests --allow-dirty` (or manually resolve) to eliminate unused imports and other warnings. The CI bar is zero warnings.
 - **DRY**: consolidate shared logic into `lib.rs` or shared functions. Check for existing implementations before writing new code. If similar logic exists in multiple places, refactor into a single source of truth.
 - **Every code change must include corresponding tests.** No exceptions. If a feature is added or a bug is fixed, a test proving it works must accompany the change.
 - **Version bump after release**: After tagging a release, immediately bump `Cargo.toml` version to the next minor (e.g. 0.2.0 → 0.3.0) so the working tree always reflects in-progress work.
