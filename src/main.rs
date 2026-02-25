@@ -726,11 +726,36 @@ fn is_daemon_running(pid_path: &std::path::Path) -> bool {
     let pid_str = match std::fs::read_to_string(pid_path) {
         Ok(s) => s, Err(_) => return false,
     };
-    let pid: i32 = match pid_str.trim().parse() {
+    let pid: u32 = match pid_str.trim().parse() {
         Ok(p) => p, Err(_) => return false,
     };
+
     #[cfg(unix)]
-    { unsafe { libc::kill(pid, 0) == 0 } }
-    #[cfg(not(unix))]
-    { let _ = pid; false }
+    {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_SYNCHRONIZE,
+        };
+
+        unsafe {
+            match OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SYNCHRONIZE, false, pid) {
+                Ok(handle) => {
+                    let _ = CloseHandle(handle);
+                    true
+                }
+                Err(_) => false,
+            }
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+        false
+    }
 }

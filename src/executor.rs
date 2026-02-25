@@ -51,9 +51,19 @@ pub struct ShellRunner;
 
 impl Runner for ShellRunner {
     fn build_command(&self, job: &Job, _config: &Config) -> Command {
-        let mut cmd = Command::new("sh");
+        let mut cmd = if cfg!(target_os = "windows") {
+            Command::new("cmd")
+        } else {
+            Command::new("sh")
+        };
+
         let shell_cmd = job.command.as_deref().unwrap_or(&job.prompt);
-        cmd.args(["-c", shell_cmd]);
+        if cfg!(target_os = "windows") {
+            cmd.args(["/C", shell_cmd]);
+        } else {
+            cmd.args(["-c", shell_cmd]);
+        }
+
         cmd.current_dir(&job.working_dir);
         cmd.env("BOO_NON_INTERACTIVE", "1");
         cmd.env("BOO_JOB_NAME", &job.name);

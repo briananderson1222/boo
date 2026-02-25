@@ -21,6 +21,9 @@ user-notify = "0.4.2"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.59", features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+
 [dev-dependencies]
 proptest = "1"
 tempfile = "3"
