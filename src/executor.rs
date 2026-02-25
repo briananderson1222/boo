@@ -162,7 +162,7 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
 mod tests {
     use super::*;
     use crate::job::Job;
-    use std::path::PathBuf;
+    
     use tempfile::tempdir;
 
     fn test_job() -> Job {
