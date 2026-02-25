@@ -70,7 +70,7 @@ mod tests {
     use super::*;
     use crate::job::Job;
     use proptest::prelude::*;
-    use std::path::PathBuf;
+    
 
     prop_compose! {
         fn arb_cron()(min in 0..60u32, hour in 0..24u32, dom in 1..29u32, month in 1..13u32, dow in 0..7u32) -> String {
