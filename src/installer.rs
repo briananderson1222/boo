@@ -228,45 +228,99 @@ fn print_crontab_instructions(binary_path: &std::path::Path) {
 }
 
 #[cfg(target_os = "windows")]
+const TASK_NAME: &str = "BooScheduler";
+
+#[cfg(target_os = "windows")]
 fn install_windows(binary_path: &std::path::Path) -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| BooError::Other("Could not determine home directory".to_string()))?;
-    let bat_path = home.join("boo-startup.bat");
-    
-    let bat_content = format!("@echo off\n\"{}\" daemon\n", binary_path.display());
-    std::fs::write(&bat_path, bat_content)?;
+    let bin = binary_path.to_string_lossy();
+
+    // Remove existing task if present (idempotent install)
+    let _ = Command::new("schtasks")
+        .args(["/Delete", "/TN", TASK_NAME, "/F"])
+        .output();
+
+    // Create a Task Scheduler task that runs at logon and restarts on failure
+    let output = Command::new("schtasks")
+        .args([
+            "/Create",
+            "/TN", TASK_NAME,
+            "/TR", &format!("\"{}\" daemon", bin),
+            "/SC", "ONLOGON",
+            "/RL", "LIMITED",
+            "/F",
+        ])
+        .output()
+        .map_err(BooError::Io)?;
+
+    if !output.status.success() {
+        return Err(BooError::Other(format!(
+            "Failed to create scheduled task: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    // Start the task immediately so the daemon begins now
+    let start = Command::new("schtasks")
+        .args(["/Run", "/TN", TASK_NAME])
+        .output();
+    if let Ok(ref o) = start {
+        if !o.status.success() {
+            eprintln!("Warning: could not start task immediately (it will start at next logon)");
+        }
+    }
 
     // Register boo:// URL scheme
-    let bin = binary_path.to_string_lossy();
     let _ = Command::new("reg").args(["add", "HKCU\\Software\\Classes\\boo", "/ve", "/d", "URL:Boo Protocol", "/f"]).output();
     let _ = Command::new("reg").args(["add", "HKCU\\Software\\Classes\\boo", "/v", "URL Protocol", "/d", "", "/f"]).output();
     let _ = Command::new("reg").args(["add", "HKCU\\Software\\Classes\\boo\\shell\\open\\command", "/ve", "/d", &format!("\"{}\" \"%1\"", bin), "/f"]).output();
-    
-    println!("Created startup batch file at: {}", bat_path.display());
+
+    println!("Created scheduled task '{}' (runs at logon)", TASK_NAME);
     println!("Registered boo:// URL scheme");
-    println!("To enable auto-start:");
-    println!("1. Press Win+R, type 'shell:startup', press Enter");
-    println!("2. Copy {} to the Startup folder", bat_path.display());
-    
-    Ok(bat_path)
+    println!("Daemon started.");
+
+    // Return binary path as the "installed" artifact
+    Ok(binary_path.to_path_buf())
 }
 
 #[cfg(target_os = "windows")]
 fn uninstall_windows() -> Result<()> {
-    let home = dirs::home_dir().ok_or_else(|| BooError::Other("Could not determine home directory".to_string()))?;
-    let bat_path = home.join("boo-startup.bat");
-    
-    if bat_path.exists() {
-        std::fs::remove_file(bat_path)?;
+    // Remove scheduled task
+    let output = Command::new("schtasks")
+        .args(["/Delete", "/TN", TASK_NAME, "/F"])
+        .output()
+        .map_err(BooError::Io)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Not an error if the task doesn't exist
+        if !stderr.contains("does not exist") && !stderr.contains("cannot find") {
+            return Err(BooError::Other(format!("Failed to remove scheduled task: {}", stderr)));
+        }
     }
-    
-    println!("Removed startup batch file. If you added it to the Startup folder, remove it manually.");
+
+    // Remove boo:// URL scheme
+    let _ = Command::new("reg").args(["delete", "HKCU\\Software\\Classes\\boo", "/f"]).output();
+
+    // Clean up legacy startup bat if present
+    if let Some(home) = dirs::home_dir() {
+        let bat_path = home.join("boo-startup.bat");
+        if bat_path.exists() {
+            let _ = std::fs::remove_file(bat_path);
+        }
+    }
+
+    println!("Removed scheduled task '{}'", TASK_NAME);
+    println!("Removed boo:// URL scheme");
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
 fn is_installed_windows() -> bool {
-    let home = dirs::home_dir().unwrap_or_default();
-    home.join("boo-startup.bat").exists()
+    Command::new("schtasks")
+        .args(["/Query", "/TN", TASK_NAME])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 
