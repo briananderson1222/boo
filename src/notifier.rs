@@ -2,6 +2,35 @@ use crate::executor::ExecutionResult;
 use crate::job::{self, Job};
 use crate::notification_service::{NotificationSender, NotifyRequest};
 
+/// Fire-and-forget HTTP POST to a webhook URL. Non-blocking, errors are silently ignored.
+pub fn notify_webhook(url: &str, event: serde_json::Value) {
+    if cfg!(test) { return; }
+    let url = url.to_string();
+    let body = serde_json::to_string(&event).unwrap_or_default();
+    tokio::spawn(async move {
+        let _ = webhook_post(&url, &body).await;
+    });
+}
+
+async fn webhook_post(url: &str, body: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let url = url::Url::parse(url)?;
+    let host = url.host_str().unwrap_or("localhost");
+    let port = url.port().unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
+    let path = if url.query().is_some() {
+        format!("{}?{}", url.path(), url.query().unwrap())
+    } else {
+        url.path().to_string()
+    };
+
+    let mut stream = tokio::net::TcpStream::connect((host, port)).await?;
+    let req = format!(
+        "POST {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        path, host, port, body.len(), body
+    );
+    tokio::io::AsyncWriteExt::write_all(&mut stream, req.as_bytes()).await?;
+    Ok(())
+}
+
 /// Build summary and body strings for a job result notification.
 fn format_notification(job: &Job, result: &ExecutionResult) -> (String, String) {
     let summary = if result.success {

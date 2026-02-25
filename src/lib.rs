@@ -41,6 +41,7 @@ pub mod test_helpers {
             max_log_runs: 10,
             heartbeat_secs: 60,
             terminal: None,
+            notify_webhook: None,
         }
     }
 }

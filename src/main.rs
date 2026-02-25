@@ -69,6 +69,9 @@ enum Commands {
         /// Send a start notification when this job begins
         #[arg(long)]
         notify_start: bool,
+        /// Pass --trust-all-tools to kiro-cli
+        #[arg(long)]
+        trust_all_tools: bool,
         /// Runner type: kiro (default), shell, or future CLI names
         #[arg(long)]
         runner: Option<String>,
@@ -92,13 +95,26 @@ enum Commands {
     /// Disable a job
     Disable { target: String },
     /// Show daemon status and next fire times
-    Status,
+    Status {
+        /// Output format: table (default), json
+        #[arg(long, default_value = "table")]
+        format: String,
+    },
     /// Run a job immediately (output to terminal)
     Run {
         target: String,
         /// Suppress notifications
         #[arg(long)]
         no_notify: bool,
+        /// Print only the response content (no status messages), for programmatic use
+        #[arg(long)]
+        follow: bool,
+        /// Launch an interactive session in the foreground instead of running non-interactively
+        #[arg(long)]
+        interactive: bool,
+        /// Pass --trust-all-tools to kiro-cli
+        #[arg(long)]
+        trust_all_tools: bool,
     },
     /// Preview next N occurrences of a cron expression
     Next {
@@ -113,6 +129,9 @@ enum Commands {
         count: usize,
         #[arg(long)]
         output: bool,
+        /// Output format: table (default), json
+        #[arg(long, default_value = "table")]
+        format: String,
     },
     /// Resume an interactive kiro-cli session (to follow up on a previous run)
     Resume {
@@ -122,6 +141,52 @@ enum Commands {
         /// Show session picker instead of resuming latest
         #[arg(long)]
         previous: bool,
+    },
+    /// Show run statistics for jobs
+    Stats {
+        /// Job name or ID (omit for all jobs)
+        target: Option<String>,
+        /// Output format: table (default), json, csv
+        #[arg(long, default_value = "table")]
+        format: String,
+    },
+    /// Edit an existing job's settings
+    Edit {
+        target: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        cron: Option<String>,
+        #[arg(long)]
+        at: Option<String>,
+        #[arg(long)]
+        every: Option<String>,
+        #[arg(long)]
+        prompt: Option<String>,
+        #[arg(long)]
+        command: Option<String>,
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        #[arg(long)]
+        agent: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        timeout: Option<u64>,
+        #[arg(long)]
+        timezone: Option<String>,
+        #[arg(long)]
+        open_artifact: Option<String>,
+        #[arg(long)]
+        retry: Option<u32>,
+        #[arg(long)]
+        retry_delay: Option<u64>,
+        #[arg(long)]
+        notify_start: Option<bool>,
+        #[arg(long)]
+        trust_all_tools: Option<bool>,
+        #[arg(long)]
+        runner: Option<String>,
     },
     /// Install boo as auto-start service
     Install,
@@ -218,7 +283,7 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
             let target = parts.get(1).ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
             tokio::runtime::Builder::new_current_thread()
                 .enable_all().build().unwrap()
-                .block_on(cmd_run(target, false))
+                .block_on(cmd_run(target, false, false, false, false))
         }
         Some("open") => {
             let target = parts.get(1).ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
@@ -263,18 +328,24 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
     match cli.command {
         Commands::Daemon => unreachable!("handled before tokio runtime"),
         Commands::Add { name, cron, at, every, prompt, command, dir, agent, model, timeout,
-                        timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, runner } =>
+                        timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, trust_all_tools, runner } =>
             cmd_add(name, cron, at, every, prompt, command, dir, agent, model, timeout,
-                    timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, runner).await,
+                    timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, trust_all_tools, runner).await,
         Commands::Remove { target, delete_logs, keep_logs } => cmd_remove(&target, delete_logs, keep_logs),
+        Commands::Edit { target, name, cron, at, every, prompt, command, dir, agent, model,
+                         timeout, timezone, open_artifact, retry, retry_delay, notify_start, trust_all_tools, runner } =>
+            cmd_edit(&target, name, cron, at, every, prompt, command, dir, agent, model,
+                     timeout, timezone, open_artifact, retry, retry_delay, notify_start, trust_all_tools, runner).await,
         Commands::List { format } => cmd_list(&format),
         Commands::Enable { target } => cmd_set_enabled(&target, true),
         Commands::Disable { target } => cmd_set_enabled(&target, false),
-        Commands::Status => cmd_status(),
-        Commands::Run { target, no_notify } => cmd_run(&target, no_notify).await,
+        Commands::Status { format } => cmd_status(&format),
+        Commands::Run { target, no_notify, follow, interactive, trust_all_tools } =>
+            cmd_run(&target, no_notify, follow, interactive, trust_all_tools).await,
         Commands::Next { cron_expr, count } => cmd_next(&cron_expr, count),
-        Commands::Logs { target, count, output } => cmd_logs(&target, count, output),
+        Commands::Logs { target, count, output, format } => cmd_logs(&target, count, output, &format),
         Commands::Resume { target, prompt, previous } => cmd_resume(target.as_deref(), prompt.as_deref(), previous),
+        Commands::Stats { target, format } => cmd_stats(target.as_deref(), &format),
         Commands::Install => cmd_install(),
         Commands::Uninstall => cmd_uninstall(),
         Commands::_Notify { .. } => unreachable!("handled before tokio runtime"),
@@ -325,16 +396,27 @@ fn cmd_daemon_blocking() -> boo::error::Result<()> {
     Ok(())
 }
 
-async fn cmd_run(target: &str, no_notify: bool) -> boo::error::Result<()> {
+async fn cmd_run(target: &str, no_notify: bool, follow: bool, interactive: bool, trust_all_tools: bool) -> boo::error::Result<()> {
     let store = JobStore::new()?;
-    let job = resolve_job(&store, target)?;
+    let mut job = resolve_job(&store, target)?;
+    if trust_all_tools { job.trust_all_tools = true; }
+
+    if interactive {
+        return launch_interactive_session(&job.working_dir, job.agent.as_deref(), Some(&job.prompt), None);
+    }
+
     let config = Config::load();
 
     if !no_notify && job.notify_start {
         notifier::notify_start(&[&job.name]);
     }
+    if let Some(ref url) = config.notify_webhook {
+        notifier::notify_webhook(url, serde_json::json!({
+            "event": "job.started", "job": job.name, "id": job.id.to_string()[..8],
+        }));
+    }
 
-    println!("Running job '{}'...", job.name);
+    if !follow { println!("Running job '{}'...", job.name); }
     let log_dir = boo::config::boo_dir().join("runs").join(job.id.to_string());
     std::fs::create_dir_all(&log_dir)?;
     let now = Utc::now();
@@ -349,14 +431,39 @@ async fn cmd_run(target: &str, no_notify: bool) -> boo::error::Result<()> {
             };
             store.append_run_record(&record)?;
             if !no_notify { notifier::notify(&job, &result); }
-            println!("Job completed: success={}, duration={:.2}s", result.success, result.duration_secs);
-            if let Some(ref response) = result.response {
-                println!("\n{response}");
+            if let Some(ref url) = config.notify_webhook {
+                let artifact = job.open_artifact.as_ref()
+                    .and_then(|a| boo::job::resolve_artifact(&job.working_dir, a))
+                    .map(|p| p.to_string_lossy().to_string());
+                notifier::notify_webhook(url, serde_json::json!({
+                    "event": if result.success { "job.completed" } else { "job.failed" },
+                    "job": job.name, "id": job.id.to_string()[..8],
+                    "success": result.success, "duration_secs": result.duration_secs,
+                    "artifact": artifact,
+                }));
+            }
+            if follow {
+                if let Some(ref response) = result.response {
+                    print!("{response}");
+                }
+                if !result.success { process::exit(1); }
+            } else {
+                println!("Job completed: success={}, duration={:.2}s", result.success, result.duration_secs);
+                if let Some(ref response) = result.response {
+                    println!("\n{response}");
+                }
             }
             Ok(())
         }
         Err(e) => {
             if !no_notify { notifier::notify_error(&job, &e.to_string()); }
+            if let Some(ref url) = config.notify_webhook {
+                notifier::notify_webhook(url, serde_json::json!({
+                    "event": "job.failed", "job": job.name, "id": job.id.to_string()[..8],
+                    "error": e.to_string(),
+                }));
+            }
+            if follow { eprintln!("{e}"); process::exit(1); }
             Err(e)
         }
     }
@@ -368,7 +475,7 @@ async fn cmd_add(
     prompt: Option<String>, command: Option<String>, dir: Option<PathBuf>, agent: Option<String>, model: Option<String>,
     timeout: Option<u64>, timezone: Option<String>, delete_after_run: bool,
     open_artifact: Option<String>, retry: u32, retry_delay: u64, notify_start: bool,
-    runner: Option<String>,
+    trust_all_tools: bool, runner: Option<String>,
 ) -> boo::error::Result<()> {
     // Require prompt or command
     if prompt.is_none() && command.is_none() {
@@ -409,6 +516,7 @@ async fn cmd_add(
     job.retry_count = retry;
     job.retry_delay_secs = retry_delay;
     job.notify_start = notify_start;
+    job.trust_all_tools = trust_all_tools;
     job.runner = if command.is_some() && runner.is_none() { Some("shell".into()) } else { runner };
     job.command = command;
 
@@ -451,6 +559,79 @@ fn cmd_remove(target: &str, delete_logs: bool, keep_logs: bool) -> boo::error::R
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn cmd_edit(
+    target: &str, name: Option<String>, cron: Option<String>, at: Option<String>,
+    every: Option<String>, prompt: Option<String>, command: Option<String>,
+    dir: Option<PathBuf>, agent: Option<String>, model: Option<String>,
+    timeout: Option<u64>, timezone: Option<String>, open_artifact: Option<String>,
+    retry: Option<u32>, retry_delay: Option<u64>, notify_start: Option<bool>,
+    trust_all_tools: Option<bool>, runner: Option<String>,
+) -> boo::error::Result<()> {
+    let store = JobStore::new()?;
+    let mut job = resolve_job(&store, target)?;
+    let mut changes = Vec::new();
+
+    if let Some(ref new_name) = name {
+        if store.load_jobs()?.iter().any(|j| j.name == *new_name && j.id != job.id) {
+            return Err(boo::error::BooError::Other(format!(
+                "Job with name '{}' already exists", new_name)));
+        }
+        let old_ws = boo::config::boo_dir().join("workspace").join(&job.name);
+        let new_ws = boo::config::boo_dir().join("workspace").join(new_name);
+        if job.working_dir == old_ws && old_ws.exists() {
+            std::fs::rename(&old_ws, &new_ws)?;
+            job.working_dir = new_ws;
+            changes.push(format!("working_dir → {}", job.working_dir.display()));
+        }
+        job.name = new_name.clone();
+        changes.push(format!("name → {new_name}"));
+    }
+    if let Some(v) = cron {
+        cron_eval::next_occurrence(&v, Utc::now())?;
+        job.cron_expr = v.clone();
+        job.at_time = None;
+        job.every_secs = None;
+        changes.push(format!("cron → {v}"));
+    } else if let Some(v) = at {
+        let at_time = parse_at_time(&v).await?;
+        job.at_time = Some(at_time);
+        job.cron_expr = String::new();
+        job.every_secs = None;
+        changes.push(format!("at → {at_time}"));
+    } else if let Some(v) = every {
+        job.every_secs = Some(parse_duration(&v)?);
+        job.cron_expr = String::new();
+        job.at_time = None;
+        changes.push(format!("every → {v}"));
+    }
+    if let Some(v) = prompt { job.prompt = v.clone(); changes.push(format!("prompt → {v}")); }
+    if let Some(v) = command { job.command = Some(v.clone()); changes.push(format!("command → {v}")); }
+    if let Some(v) = dir { job.working_dir = v.clone(); changes.push(format!("dir → {}", v.display())); }
+    if let Some(v) = agent { job.agent = Some(v.clone()); changes.push(format!("agent → {v}")); }
+    if let Some(v) = model { job.model = Some(v.clone()); changes.push(format!("model → {v}")); }
+    if let Some(v) = timeout { job.timeout_secs = Some(v); changes.push(format!("timeout → {v}s")); }
+    if let Some(v) = timezone { job.timezone = Some(v.clone()); changes.push(format!("timezone → {v}")); }
+    if let Some(v) = open_artifact { job.open_artifact = Some(v.clone()); changes.push(format!("open_artifact → {v}")); }
+    if let Some(v) = retry { job.retry_count = v; changes.push(format!("retry → {v}")); }
+    if let Some(v) = retry_delay { job.retry_delay_secs = v; changes.push(format!("retry_delay → {v}s")); }
+    if let Some(v) = notify_start { job.notify_start = v; changes.push(format!("notify_start → {v}")); }
+    if let Some(v) = trust_all_tools { job.trust_all_tools = v; changes.push(format!("trust_all_tools → {v}")); }
+    if let Some(v) = runner { job.runner = Some(v.clone()); changes.push(format!("runner → {v}")); }
+
+    if changes.is_empty() {
+        println!("No changes specified.");
+        return Ok(());
+    }
+
+    store.update_job(&job)?;
+    println!("Updated job '{}' ({}):", job.name, job.id);
+    for c in &changes {
+        println!("  {c}");
+    }
+    Ok(())
+}
+
 fn cmd_list(format: &str) -> boo::error::Result<()> {
     let store = JobStore::new()?;
     let jobs = store.load_jobs()?;
@@ -488,11 +669,21 @@ fn cmd_list(format: &str) -> boo::error::Result<()> {
 
     match format {
         "json" => {
-            let items: Vec<_> = rows.iter().map(|r| serde_json::json!({
-                "id": r.0, "name": r.1, "schedule": r.2, "enabled": r.3,
-                "next_fire": r.4, "last_run": r.5, "artifact": r.6,
-                "artifact_file": r.7, "working_dir": r.8,
-            })).collect();
+            let items: Vec<_> = jobs.iter().map(|job| {
+                let next_fire = if !job.enabled { None } else { cron_eval::next_fire_time(job, now) };
+                serde_json::json!({
+                    "id": job.id.to_string()[..8],
+                    "name": job.name,
+                    "schedule": job.schedule_display(),
+                    "schedule_human": cron_to_human(&job),
+                    "enabled": if job.enabled { "yes" } else { "no" },
+                    "next_fire": next_fire.map(|t| t.to_rfc3339()),
+                    "last_run": job.last_run.map(|t| t.to_rfc3339()),
+                    "artifact": job.open_artifact.as_deref().unwrap_or("-"),
+                    "artifact_file": job.open_artifact.as_ref().and_then(|a| boo::job::resolve_artifact(&job.working_dir, a).map(|p| p.to_string_lossy().to_string())),
+                    "working_dir": job.working_dir.to_string_lossy().replace(&home, "~"),
+                })
+            }).collect();
             println!("{}", serde_json::to_string_pretty(&items).unwrap());
         }
         "csv" => {
@@ -532,18 +723,37 @@ fn cmd_set_enabled(target: &str, enabled: bool) -> boo::error::Result<()> {
     Ok(())
 }
 
-fn cmd_status() -> boo::error::Result<()> {
+fn cmd_status(format: &str) -> boo::error::Result<()> {
     let boo_dir = boo::config::boo_dir();
     let running = is_daemon_running(&boo_dir.join("daemon.pid"));
-    println!("Daemon: {}", if running { "running" } else { "stopped" });
 
     let store = JobStore::new()?;
     let jobs: Vec<_> = store.load_jobs()?.into_iter().filter(|j| j.enabled).collect();
+    let now = Utc::now();
+
+    if format == "json" {
+        let next_fires: Vec<_> = jobs.iter().map(|job| {
+            serde_json::json!({
+                "name": job.name,
+                "id": job.id.to_string(),
+                "schedule": job.schedule_display(),
+                "next_fire": cron_eval::next_fire_time(job, now).map(|t| t.to_rfc3339()),
+            })
+        }).collect();
+        let obj = serde_json::json!({
+            "daemon_running": running,
+            "enabled_jobs": jobs.len(),
+            "jobs": next_fires,
+        });
+        println!("{}", serde_json::to_string_pretty(&obj).unwrap());
+        return Ok(());
+    }
+
+    println!("Daemon: {}", if running { "running" } else { "stopped" });
     if jobs.is_empty() {
         println!("No enabled jobs");
         return Ok(());
     }
-    let now = Utc::now();
     println!("\nNext fire times:");
     for job in jobs {
         match cron_eval::next_fire_time(&job, now) {
@@ -563,12 +773,16 @@ fn cmd_next(cron_expr: &str, count: usize) -> boo::error::Result<()> {
     Ok(())
 }
 
-fn cmd_logs(target: &str, count: usize, output: bool) -> boo::error::Result<()> {
+fn cmd_logs(target: &str, count: usize, output: bool, format: &str) -> boo::error::Result<()> {
     let store = JobStore::new()?;
     let job = resolve_job(&store, target)?;
     let records = store.load_run_records(job.id, count)?;
     if records.is_empty() {
-        println!("No run records for job '{}'", job.name);
+        if format == "json" {
+            println!("[]");
+        } else {
+            println!("No run records for job '{}'", job.name);
+        }
         return Ok(());
     }
     if output {
@@ -581,6 +795,24 @@ fn cmd_logs(target: &str, count: usize, output: bool) -> boo::error::Result<()> 
                 Err(e) => println!("Could not read output: {e}"),
             },
         }
+        return Ok(());
+    }
+    if format == "json" {
+        let items: Vec<_> = records.iter().map(|r| {
+            serde_json::json!({
+                "job_id": r.job_id.to_string(),
+                "job_name": r.job_name,
+                "fired_at": r.fired_at.to_rfc3339(),
+                "scheduled_for": r.scheduled_for.to_rfc3339(),
+                "missed_count": r.missed_count,
+                "duration_secs": r.duration_secs,
+                "exit_code": r.exit_code,
+                "success": r.success,
+                "manual": r.manual,
+                "output_path": r.output_path.to_string_lossy(),
+            })
+        }).collect();
+        println!("{}", serde_json::to_string_pretty(&items).unwrap());
         return Ok(());
     }
     println!("Recent runs for '{}':", job.name);
@@ -597,8 +829,31 @@ fn cmd_logs(target: &str, count: usize, output: bool) -> boo::error::Result<()> 
     Ok(())
 }
 
-fn cmd_resume(target: Option<&str>, prompt: Option<&str>, previous: bool) -> boo::error::Result<()> {
+fn launch_interactive_session(
+    dir: &std::path::Path,
+    agent: Option<&str>,
+    prompt: Option<&str>,
+    resume: Option<bool>, // None = fresh, Some(false) = --resume latest, Some(true) = --resume-picker
+) -> boo::error::Result<()> {
     let config = Config::load();
+    let mut cmd = std::process::Command::new(&config.kiro_cli_path);
+    cmd.arg("chat");
+    match resume {
+        Some(true) => { cmd.arg("--resume-picker"); }
+        Some(false) => { cmd.arg("--resume"); }
+        None => {}
+    }
+    if let Some(a) = agent { cmd.args(["--agent", a]); }
+    if let Some(p) = prompt { cmd.args(["--", p]); }
+    cmd.current_dir(dir);
+    let status = cmd.status().map_err(boo::error::BooError::Io)?;
+    if !status.success() {
+        return Err(boo::error::BooError::Other("kiro-cli session exited with error".into()));
+    }
+    Ok(())
+}
+
+fn cmd_resume(target: Option<&str>, prompt: Option<&str>, previous: bool) -> boo::error::Result<()> {
     let (dir, agent) = if let Some(t) = target {
         let store = JobStore::new()?;
         let job = resolve_job(&store, t)?;
@@ -606,24 +861,7 @@ fn cmd_resume(target: Option<&str>, prompt: Option<&str>, previous: bool) -> boo
     } else {
         (boo::config::boo_dir().join("workspace"), None)
     };
-
-    let mut cmd = std::process::Command::new(&config.kiro_cli_path);
-    cmd.arg("chat");
-    if previous {
-        cmd.arg("--resume-picker");
-    } else {
-        cmd.arg("--resume");
-    }
-    if let Some(ref a) = agent { cmd.args(["--agent", a]); }
-    if let Some(p) = prompt {
-        cmd.args(["--", p]);
-    }
-    cmd.current_dir(&dir);
-    let status = cmd.status().map_err(boo::error::BooError::Io)?;
-    if !status.success() {
-        return Err(boo::error::BooError::Other("kiro-cli session exited with error".into()));
-    }
-    Ok(())
+    launch_interactive_session(&dir, agent.as_deref(), prompt, Some(previous))
 }
 
 fn cmd_install() -> boo::error::Result<()> {
@@ -638,7 +876,171 @@ fn cmd_uninstall() -> boo::error::Result<()> {
     Ok(())
 }
 
+fn cmd_stats(target: Option<&str>, format: &str) -> boo::error::Result<()> {
+    let store = JobStore::new()?;
+    let jobs = if let Some(t) = target {
+        vec![resolve_job(&store, t)?]
+    } else {
+        store.load_jobs()?
+    };
+
+    if jobs.is_empty() {
+        if format == "json" { println!("{{\"jobs\":[],\"total\":{{}}}}"); }
+        else { println!("No jobs configured"); }
+        return Ok(());
+    }
+
+    let now = Utc::now();
+    let window_24h = now - chrono::Duration::hours(24);
+    let window_7d = now - chrono::Duration::days(7);
+    let window_30d = now - chrono::Duration::days(30);
+
+    #[derive(Default)]
+    struct Stats {
+        total: u64, successes: u64, failures: u64, manual: u64,
+        total_missed: u64, total_duration: f64, max_duration: f64,
+        last_success: Option<DateTime<Utc>>, last_failure: Option<DateTime<Utc>>,
+        runs_24h: u64, ok_24h: u64, fail_24h: u64,
+        runs_7d: u64, ok_7d: u64, fail_7d: u64,
+        runs_30d: u64, ok_30d: u64, fail_30d: u64,
+    }
+
+    let mut all_stats: Vec<(String, String, Stats)> = Vec::new();
+    let mut global = Stats::default();
+
+    for job in &jobs {
+        let records = store.load_run_records(job.id, 10_000)?;
+        let mut s = Stats::default();
+        for r in &records {
+            s.total += 1;
+            if r.success { s.successes += 1; } else { s.failures += 1; }
+            if r.manual { s.manual += 1; }
+            s.total_missed += r.missed_count as u64;
+            s.total_duration += r.duration_secs;
+            if r.duration_secs > s.max_duration { s.max_duration = r.duration_secs; }
+            if r.success { s.last_success = Some(s.last_success.map_or(r.fired_at, |prev: DateTime<Utc>| prev.max(r.fired_at))); }
+            else { s.last_failure = Some(s.last_failure.map_or(r.fired_at, |prev: DateTime<Utc>| prev.max(r.fired_at))); }
+            if r.fired_at >= window_24h { s.runs_24h += 1; if r.success { s.ok_24h += 1; } else { s.fail_24h += 1; } }
+            if r.fired_at >= window_7d { s.runs_7d += 1; if r.success { s.ok_7d += 1; } else { s.fail_7d += 1; } }
+            if r.fired_at >= window_30d { s.runs_30d += 1; if r.success { s.ok_30d += 1; } else { s.fail_30d += 1; } }
+        }
+        global.total += s.total; global.successes += s.successes; global.failures += s.failures;
+        global.manual += s.manual; global.total_missed += s.total_missed;
+        global.total_duration += s.total_duration;
+        if s.max_duration > global.max_duration { global.max_duration = s.max_duration; }
+        global.runs_24h += s.runs_24h; global.ok_24h += s.ok_24h; global.fail_24h += s.fail_24h;
+        global.runs_7d += s.runs_7d; global.ok_7d += s.ok_7d; global.fail_7d += s.fail_7d;
+        global.runs_30d += s.runs_30d; global.ok_30d += s.ok_30d; global.fail_30d += s.fail_30d;
+        if let Some(t) = s.last_success { global.last_success = Some(global.last_success.map_or(t, |p: DateTime<Utc>| p.max(t))); }
+        if let Some(t) = s.last_failure { global.last_failure = Some(global.last_failure.map_or(t, |p: DateTime<Utc>| p.max(t))); }
+        all_stats.push((job.name.clone(), job.id.to_string(), s));
+    }
+
+    fn rate(ok: u64, total: u64) -> f64 { if total == 0 { 0.0 } else { ok as f64 / total as f64 * 100.0 } }
+    fn avg(total_dur: f64, count: u64) -> f64 { if count == 0 { 0.0 } else { total_dur / count as f64 } }
+
+    fn stats_json(s: &Stats) -> serde_json::Value {
+        serde_json::json!({
+            "total_runs": s.total, "successes": s.successes, "failures": s.failures,
+            "manual_runs": s.manual, "total_missed": s.total_missed,
+            "avg_duration": (avg(s.total_duration, s.total) * 100.0).round() / 100.0,
+            "max_duration": (s.max_duration * 100.0).round() / 100.0,
+            "success_rate": (rate(s.successes, s.total) * 10.0).round() / 10.0,
+            "last_success": s.last_success.map(|t| t.to_rfc3339()),
+            "last_failure": s.last_failure.map(|t| t.to_rfc3339()),
+            "last_24h": { "runs": s.runs_24h, "successes": s.ok_24h, "failures": s.fail_24h },
+            "last_7d": { "runs": s.runs_7d, "successes": s.ok_7d, "failures": s.fail_7d },
+            "last_30d": { "runs": s.runs_30d, "successes": s.ok_30d, "failures": s.fail_30d },
+        })
+    }
+
+    if format == "json" {
+        let job_items: Vec<_> = all_stats.iter().map(|(name, id, s)| {
+            let mut v = stats_json(s);
+            v["name"] = serde_json::json!(name);
+            v["id"] = serde_json::json!(id);
+            v
+        }).collect();
+        let obj = serde_json::json!({ "jobs": job_items, "total": stats_json(&global) });
+        println!("{}", serde_json::to_string_pretty(&obj).unwrap());
+        return Ok(());
+    }
+
+    if format == "csv" {
+        println!("name,runs,ok,fail,manual,missed,avg_time,max_time,success_rate");
+        for (name, _, s) in &all_stats {
+            println!("{},{},{},{},{},{},{:.2},{:.2},{:.1}",
+                name, s.total, s.successes, s.failures, s.manual, s.total_missed,
+                avg(s.total_duration, s.total), s.max_duration, rate(s.successes, s.total));
+        }
+        return Ok(());
+    }
+
+    // Table format
+    println!("{:<18} {:>5} {:>4} {:>5} {:>6} {:>7} {:>9} {:>8}",
+        "Job", "Runs", "OK", "Fail", "Missed", "Avg Time", "Max Time", "Success%");
+    println!("{}", "-".repeat(78));
+    for (name, _, s) in &all_stats {
+        println!("{:<18} {:>5} {:>4} {:>5} {:>6} {:>7.1}s {:>8.1}s {:>7.1}%",
+            name, s.total, s.successes, s.failures, s.total_missed,
+            avg(s.total_duration, s.total), s.max_duration, rate(s.successes, s.total));
+    }
+    if all_stats.len() > 1 {
+        println!("{}", "-".repeat(78));
+        println!("{:<18} {:>5} {:>4} {:>5} {:>6} {:>7.1}s {:>8.1}s {:>7.1}%",
+            "TOTAL", global.total, global.successes, global.failures, global.total_missed,
+            avg(global.total_duration, global.total), global.max_duration, rate(global.successes, global.total));
+    }
+    Ok(())
+}
+
 // --- Helpers ---
+
+/// Convert a job's schedule to a human-friendly description.
+fn cron_to_human(job: &Job) -> String {
+    if let Some(at) = job.at_time {
+        return format!("Once at {}", at.format("%b %d, %I:%M %p UTC"));
+    }
+    if let Some(secs) = job.every_secs {
+        return if secs >= 86400 { format!("Every {} day(s)", secs / 86400) }
+        else if secs >= 3600 { format!("Every {} hour(s)", secs / 3600) }
+        else if secs >= 60 { format!("Every {} minute(s)", secs / 60) }
+        else { format!("Every {} second(s)", secs) };
+    }
+    let parts: Vec<&str> = job.cron_expr.split_whitespace().collect();
+    if parts.len() != 5 { return job.cron_expr.clone(); }
+    let (min, hour, _dom, _mon, dow) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
+
+    let time = match (hour, min) {
+        (h, m) if !h.contains('*') && !h.contains('/') && !h.contains('-') && !m.contains('*') && !m.contains('/') => {
+            let h: u32 = h.parse().unwrap_or(0);
+            let m: u32 = m.parse().unwrap_or(0);
+            let (h12, ampm) = if h == 0 { (12, "AM") } else if h < 12 { (h, "AM") } else if h == 12 { (12, "PM") } else { (h - 12, "PM") };
+            format!("{h12}:{m:02} {ampm} UTC")
+        }
+        _ if min.starts_with("*/") && hour.contains('-') => {
+            format!("Every {} min ({} UTC)", &min[2..], hour)
+        }
+        _ if min.starts_with("*/") => format!("Every {} min", &min[2..]),
+        _ => format!("{hour}:{min} UTC"),
+    };
+
+    let days = match dow {
+        "*" => "Daily".into(),
+        "1-5" => "Weekdays".into(),
+        "0,6" | "6,0" => "Weekends".into(),
+        "0" | "7" => "Sundays".into(),
+        "1" => "Mondays".into(),
+        "2" => "Tuesdays".into(),
+        "3" => "Wednesdays".into(),
+        "4" => "Thursdays".into(),
+        "5" => "Fridays".into(),
+        "6" => "Saturdays".into(),
+        d => format!("Days {d}"),
+    };
+
+    format!("{days} at {time}")
+}
 
 fn resolve_job(store: &JobStore, target: &str) -> boo::error::Result<Job> {
     if let Ok(uuid) = Uuid::parse_str(target) {
