@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-02-26
+
+### Bug Fixes
+- fix: `boo status` reports "stopped" when daemon is running but `daemon.pid` is missing — now falls back to checking `daemon.lock`
+- fix: `test_status_daemon_not_running` no longer deletes the real `~/.boo/daemon.pid` during test runs
+
 ## [0.3.0] - 2026-02-26
 
 ### New Commands
