@@ -488,6 +488,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn test_generate_plist() {
         let binary_path = PathBuf::from("/usr/local/bin/boo");
         let boo_dir = PathBuf::from("/Users/test/.boo");
