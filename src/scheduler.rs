@@ -183,7 +183,7 @@ impl<C: Clock + 'static> Scheduler<C> {
         let mut last_err = None;
 
         for attempt in 1..=max_attempts {
-            match Self::execute_job_impl(&job, &config, &store_dir, &clock, attempt, max_attempts, &sender, &webhook_url).await {
+            match Self::execute_job_impl(&job, &config, &store_dir, &clock, &sender, &webhook_url).await {
                 Ok(success) => {
                     if success {
                         // Delete one-shot jobs after success
@@ -220,8 +220,6 @@ impl<C: Clock + 'static> Scheduler<C> {
         config: &Config,
         store_dir: &Option<PathBuf>,
         clock: &C,
-        _attempt: u32,
-        _max_attempts: u32,
         sender: &Option<NotificationSender>,
         webhook_url: &Option<String>,
     ) -> crate::error::Result<bool> {

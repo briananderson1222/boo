@@ -675,7 +675,7 @@ fn cmd_list(format: &str) -> boo::error::Result<()> {
                     "id": job.id.to_string()[..8],
                     "name": job.name,
                     "schedule": job.schedule_display(),
-                    "schedule_human": cron_to_human(&job),
+                    "schedule_human": cron_to_human(job),
                     "enabled": if job.enabled { "yes" } else { "no" },
                     "next_fire": next_fire.map(|t| t.to_rfc3339()),
                     "last_run": job.last_run.map(|t| t.to_rfc3339()),
