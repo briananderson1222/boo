@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-02-26
+
+### New Commands
+- `boo edit`: modify existing job settings without remove/re-add
+- `boo stats`: run statistics with 24h/7d/30d windows, JSON/CSV output
+
+### Features
+- `--trust-all-tools` opt-in flag per job (no longer forced)
+- `notify_webhook`: fire-and-forget HTTP POST for job lifecycle events
+- `boo run --follow`: print only response content for programmatic use
+- `boo run --interactive`: launch foreground kiro-cli session for a job
+- JSON output format for `status`, `logs`, and `list` commands
+- Human-readable schedule descriptions in JSON output
+- Notification body prefers `Summary:` line or last non-empty line
+
+### Bug Fixes
+- Add `~/.local/bin` to launchd PATH for kiro-cli and user tools
+- Update Windows crate API for windows 0.59 compatibility
+- Gate plist test to macOS only (was failing on Linux CI)
+- Resolve clippy warnings (unused params, needless borrow)
+
+### Code Quality
+- Zero-warnings convention enforced
+- Remove unused imports
+
 ## [0.2.0] - 2026-02-22
 
 ### Dependencies
