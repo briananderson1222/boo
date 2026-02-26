@@ -32,7 +32,8 @@ pub struct KiroRunner;
 impl Runner for KiroRunner {
     fn build_command(&self, job: &Job, config: &Config) -> Command {
         let mut cmd = Command::new(&config.kiro_cli_path);
-        cmd.args(["chat", "--no-interactive", "--trust-all-tools", "--wrap", "never"]);
+        cmd.args(["chat", "--no-interactive", "--wrap", "never"]);
+        if job.trust_all_tools { cmd.arg("--trust-all-tools"); }
         if let Some(ref agent) = job.agent { cmd.args(["--agent", agent]); }
         if let Some(ref model) = job.model { cmd.args(["--model", model]); }
         cmd.current_dir(&job.working_dir);
@@ -161,7 +162,7 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
 mod tests {
     use super::*;
     use crate::job::Job;
-    use std::path::PathBuf;
+    
     use tempfile::tempdir;
 
     fn test_job() -> Job {

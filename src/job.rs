@@ -41,6 +41,9 @@ pub struct Job {
     /// Send a start notification when this job begins.
     #[serde(default)]
     pub notify_start: bool,
+    /// Pass --trust-all-tools to kiro-cli (opt-in).
+    #[serde(default)]
+    pub trust_all_tools: bool,
     /// Runner type: "kiro" (default), "shell", or future CLI names.
     #[serde(default)]
     pub runner: Option<String>,
@@ -96,6 +99,7 @@ impl Job {
             retry_count: 0,
             retry_delay_secs: default_retry_delay(),
             notify_start: false,
+            trust_all_tools: false,
             runner: None,
             command: None,
         }

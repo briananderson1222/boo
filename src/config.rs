@@ -23,6 +23,10 @@ pub struct Config {
     /// Terminal app for interactive sessions (e.g. "iTerm", "Ghostty", "Terminal")
     #[serde(default)]
     pub terminal: Option<String>,
+
+    /// Webhook URL to POST job events to (e.g. "http://localhost:3141/scheduler/webhook")
+    #[serde(default)]
+    pub notify_webhook: Option<String>,
 }
 
 fn default_kiro_path() -> String {
@@ -46,6 +50,7 @@ impl Default for Config {
             max_log_runs: default_max_log_runs(),
             heartbeat_secs: default_heartbeat_secs(),
             terminal: None,
+            notify_webhook: None,
         }
     }
 }
@@ -113,6 +118,7 @@ mod tests {
             max_log_runs: 100,
             heartbeat_secs: 30,
             terminal: None,
+            notify_webhook: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
