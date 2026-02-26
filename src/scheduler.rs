@@ -2,7 +2,7 @@ use crate::clock::Clock;
 use crate::config::{Config, runs_dir};
 use crate::cron_eval;
 use crate::executor;
-use crate::job::{Job, RunRecord};
+use crate::job::{self, Job, RunRecord};
 use crate::notification_service::{NotificationSender, NotifyRequest};
 use crate::notifier;
 use crate::store::JobStore;
@@ -97,6 +97,17 @@ impl<C: Clock + 'static> Scheduler<C> {
             }
         }
 
+        // Webhook: notify started for ALL fired jobs (not just notify_start ones)
+        if let Some(ref url) = self.config.notify_webhook {
+            for job in &to_fire {
+                notifier::notify_webhook(url, serde_json::json!({
+                    "event": "job.started",
+                    "job": job.name,
+                    "id": job.id.to_string()[..8],
+                }));
+            }
+        }
+
         for job in to_fire {
             self.spawn_job(job);
         }
@@ -108,11 +119,12 @@ impl<C: Clock + 'static> Scheduler<C> {
         let running_jobs = self.running_jobs.clone();
         let clock = self.clock.clone();
         let sender = self.notification_sender.clone();
+        let webhook_url = self.config.notify_webhook.clone();
 
         tokio::spawn(async move {
             { running_jobs.lock().await.insert(job.id); }
 
-            let result = Self::execute_with_retry(job.clone(), config, store_dir.clone(), clock, sender.clone()).await;
+            let result = Self::execute_with_retry(job.clone(), config, store_dir.clone(), clock, sender.clone(), webhook_url.clone()).await;
             if let Err(e) = &result {
                 let retries = job.retry_count;
                 let msg = if retries > 0 {
@@ -136,13 +148,22 @@ impl<C: Clock + 'static> Scheduler<C> {
                 if let Some(ref s) = sender {
                     s.send(NotifyRequest {
                         summary: format!("✗ Job '{}' failed", job.name),
-                        body: msg,
+                        body: msg.clone(),
                         open: latest_log,
                         working_dir: Some(job.working_dir.to_string_lossy().to_string()),
                         job_name: Some(job.name.clone()),
                     });
                 } else {
                     notifier::notify_error(&job, &msg);
+                }
+
+                if let Some(ref url) = webhook_url {
+                    notifier::notify_webhook(url, serde_json::json!({
+                        "event": "job.failed",
+                        "job": job.name,
+                        "id": job.id.to_string()[..8],
+                        "error": msg,
+                    }));
                 }
             }
 
@@ -156,12 +177,13 @@ impl<C: Clock + 'static> Scheduler<C> {
         store_dir: Option<PathBuf>,
         clock: C,
         sender: Option<NotificationSender>,
+        webhook_url: Option<String>,
     ) -> crate::error::Result<()> {
         let max_attempts = job.retry_count + 1;
         let mut last_err = None;
 
         for attempt in 1..=max_attempts {
-            match Self::execute_job_impl(&job, &config, &store_dir, &clock, attempt, max_attempts, &sender).await {
+            match Self::execute_job_impl(&job, &config, &store_dir, &clock, &sender, &webhook_url).await {
                 Ok(success) => {
                     if success {
                         // Delete one-shot jobs after success
@@ -198,9 +220,8 @@ impl<C: Clock + 'static> Scheduler<C> {
         config: &Config,
         store_dir: &Option<PathBuf>,
         clock: &C,
-        _attempt: u32,
-        _max_attempts: u32,
         sender: &Option<NotificationSender>,
+        webhook_url: &Option<String>,
     ) -> crate::error::Result<bool> {
         let store = Self::make_store(store_dir)?;
         let now = clock.now();
@@ -254,6 +275,20 @@ impl<C: Clock + 'static> Scheduler<C> {
         store.update_job(&updated)?;
 
         notifier::send_notification(job, &result, sender);
+
+        if let Some(ref url) = webhook_url {
+            let artifact = job.open_artifact.as_ref()
+                .and_then(|a| job::resolve_artifact(&job.working_dir, a))
+                .map(|p| p.to_string_lossy().to_string());
+            notifier::notify_webhook(url, serde_json::json!({
+                "event": if result.success { "job.completed" } else { "job.failed" },
+                "job": job.name,
+                "id": job.id.to_string()[..8],
+                "success": result.success,
+                "duration_secs": result.duration_secs,
+                "artifact": artifact,
+            }));
+        }
 
         Ok(result.success)
     }
