@@ -1125,39 +1125,36 @@ async fn parse_at_time(input: &str) -> boo::error::Result<DateTime<Utc>> {
 }
 
 fn is_daemon_running(pid_path: &std::path::Path) -> bool {
-    let pid_str = match std::fs::read_to_string(pid_path) {
-        Ok(s) => s, Err(_) => return false,
-    };
-    let pid: u32 = match pid_str.trim().parse() {
-        Ok(p) => p, Err(_) => return false,
-    };
+    // Primary: check PID file
+    if let Ok(pid_str) = std::fs::read_to_string(pid_path) {
+        if let Ok(pid) = pid_str.trim().parse::<u32>() {
+            #[cfg(unix)]
+            { if unsafe { libc::kill(pid as i32, 0) == 0 } { return true; } }
 
-    #[cfg(unix)]
-    {
-        unsafe { libc::kill(pid as i32, 0) == 0 }
-    }
-
-    #[cfg(windows)]
-    {
-        use windows::Win32::Foundation::CloseHandle;
-        use windows::Win32::System::Threading::{
-            OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_SYNCHRONIZE,
-        };
-
-        unsafe {
-            match OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SYNCHRONIZE, false, pid) {
-                Ok(handle) => {
-                    let _ = CloseHandle(handle);
-                    true
+            #[cfg(windows)]
+            {
+                use windows::Win32::Foundation::CloseHandle;
+                use windows::Win32::System::Threading::{
+                    OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_SYNCHRONIZE,
+                };
+                unsafe {
+                    if let Ok(handle) = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SYNCHRONIZE, false, pid) {
+                        let _ = CloseHandle(handle);
+                        return true;
+                    }
                 }
-                Err(_) => false,
             }
         }
     }
 
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = pid;
-        false
+    // Fallback: if daemon.pid is missing/stale, check if daemon.lock is held
+    let lock_path = pid_path.with_file_name("daemon.lock");
+    if let Ok(file) = std::fs::File::open(&lock_path) {
+        use fs2::FileExt;
+        if file.try_lock_exclusive().is_err() {
+            return true; // lock held → daemon is running
+        }
+        let _ = file.unlock();
     }
+    false
 }
