@@ -3,7 +3,6 @@ use crate::error::{BooError, Result};
 use crate::job::Job;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::os::unix::process::CommandExt;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::Command;
