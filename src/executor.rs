@@ -93,6 +93,7 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
     let mut cmd = runner.build_command(job, config);
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // Spawn in new process group so we can kill all descendants on timeout
+    #[cfg(unix)]
     unsafe { cmd.pre_exec(|| { libc::setpgid(0, 0); Ok(()) }); }
 
     let mut child = cmd.spawn().map_err(BooError::Io)?;
@@ -156,6 +157,7 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
         Ok(Err(e)) => Err(e),
         Err(_) => {
             // Kill entire process group (child + all descendants)
+            #[cfg(unix)]
             if let Some(id) = child.id() {
                 unsafe { libc::killpg(id as i32, libc::SIGKILL); }
             }
