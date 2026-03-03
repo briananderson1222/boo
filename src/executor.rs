@@ -3,6 +3,7 @@ use crate::error::{BooError, Result};
 use crate::job::Job;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::os::unix::process::CommandExt;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -34,6 +35,7 @@ impl Runner for KiroRunner {
         let mut cmd = Command::new(&config.kiro_cli_path);
         cmd.args(["chat", "--no-interactive", "--wrap", "never"]);
         if job.trust_all_tools { cmd.arg("--trust-all-tools"); }
+        if let Some(ref tools) = job.trust_tools { cmd.args(["--trust-tools", tools]); }
         if let Some(ref agent) = job.agent { cmd.args(["--agent", agent]); }
         if let Some(ref model) = job.model { cmd.args(["--model", model]); }
         cmd.current_dir(&job.working_dir);
@@ -91,6 +93,8 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
 
     let mut cmd = runner.build_command(job, config);
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Spawn in new process group so we can kill all descendants on timeout
+    unsafe { cmd.pre_exec(|| { libc::setpgid(0, 0); Ok(()) }); }
 
     let mut child = cmd.spawn().map_err(BooError::Io)?;
 
@@ -152,6 +156,10 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
         }),
         Ok(Err(e)) => Err(e),
         Err(_) => {
+            // Kill entire process group (child + all descendants)
+            if let Some(id) = child.id() {
+                unsafe { libc::killpg(id as i32, libc::SIGKILL); }
+            }
             let _ = child.kill().await;
             Err(BooError::JobTimeout(timeout_secs))
         }

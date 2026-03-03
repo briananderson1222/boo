@@ -44,12 +44,18 @@ pub struct Job {
     /// Pass --trust-all-tools to kiro-cli (opt-in).
     #[serde(default)]
     pub trust_all_tools: bool,
+    /// Pass --trust-tools=<list> to kiro-cli (selective tool trust).
+    #[serde(default)]
+    pub trust_tools: Option<String>,
     /// Runner type: "kiro" (default), "shell", or future CLI names.
     #[serde(default)]
     pub runner: Option<String>,
     /// Raw shell command (shortcut for runner=shell). Mutually exclusive with prompt for shell jobs.
     #[serde(default)]
     pub command: Option<String>,
+    /// Optional human-readable description of what this job does.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 fn default_retry_delay() -> u64 {
@@ -100,8 +106,10 @@ impl Job {
             retry_delay_secs: default_retry_delay(),
             notify_start: false,
             trust_all_tools: false,
+            trust_tools: None,
             runner: None,
             command: None,
+            description: None,
         }
     }
 
