@@ -72,9 +72,15 @@ enum Commands {
         /// Pass --trust-all-tools to kiro-cli
         #[arg(long)]
         trust_all_tools: bool,
+        /// Trust only these tools (comma-separated). Example: --trust-tools=write,shell
+        #[arg(long)]
+        trust_tools: Option<String>,
         /// Runner type: kiro (default), shell, or future CLI names
         #[arg(long)]
         runner: Option<String>,
+        /// Human-readable description of what this job does
+        #[arg(long)]
+        description: Option<String>,
     },
     /// Remove a job by ID or name
     Remove {
@@ -115,6 +121,9 @@ enum Commands {
         /// Pass --trust-all-tools to kiro-cli
         #[arg(long)]
         trust_all_tools: bool,
+        /// Trust only these tools (comma-separated). Example: --trust-tools=write,shell
+        #[arg(long)]
+        trust_tools: Option<String>,
     },
     /// Preview next N occurrences of a cron expression
     Next {
@@ -185,8 +194,13 @@ enum Commands {
         notify_start: Option<bool>,
         #[arg(long)]
         trust_all_tools: Option<bool>,
+        /// Trust only these tools (comma-separated, or empty string to clear)
+        #[arg(long)]
+        trust_tools: Option<String>,
         #[arg(long)]
         runner: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
     },
     /// Install boo as auto-start service
     Install,
@@ -283,7 +297,7 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
             let target = parts.get(1).ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
             tokio::runtime::Builder::new_current_thread()
                 .enable_all().build().unwrap()
-                .block_on(cmd_run(target, false, false, false, false))
+                .block_on(cmd_run(target, false, false, false, false, None))
         }
         Some("open") => {
             let target = parts.get(1).ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
@@ -328,20 +342,20 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
     match cli.command {
         Commands::Daemon => unreachable!("handled before tokio runtime"),
         Commands::Add { name, cron, at, every, prompt, command, dir, agent, model, timeout,
-                        timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, trust_all_tools, runner } =>
+                        timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, trust_all_tools, trust_tools, runner, description } =>
             cmd_add(name, cron, at, every, prompt, command, dir, agent, model, timeout,
-                    timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, trust_all_tools, runner).await,
+                    timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, trust_all_tools, trust_tools, runner, description).await,
         Commands::Remove { target, delete_logs, keep_logs } => cmd_remove(&target, delete_logs, keep_logs),
         Commands::Edit { target, name, cron, at, every, prompt, command, dir, agent, model,
-                         timeout, timezone, open_artifact, retry, retry_delay, notify_start, trust_all_tools, runner } =>
+                         timeout, timezone, open_artifact, retry, retry_delay, notify_start, trust_all_tools, trust_tools, runner, description } =>
             cmd_edit(&target, name, cron, at, every, prompt, command, dir, agent, model,
-                     timeout, timezone, open_artifact, retry, retry_delay, notify_start, trust_all_tools, runner).await,
+                     timeout, timezone, open_artifact, retry, retry_delay, notify_start, trust_all_tools, trust_tools, runner, description).await,
         Commands::List { format } => cmd_list(&format),
         Commands::Enable { target } => cmd_set_enabled(&target, true),
         Commands::Disable { target } => cmd_set_enabled(&target, false),
         Commands::Status { format } => cmd_status(&format),
-        Commands::Run { target, no_notify, follow, interactive, trust_all_tools } =>
-            cmd_run(&target, no_notify, follow, interactive, trust_all_tools).await,
+        Commands::Run { target, no_notify, follow, interactive, trust_all_tools, trust_tools } =>
+            cmd_run(&target, no_notify, follow, interactive, trust_all_tools, trust_tools).await,
         Commands::Next { cron_expr, count } => cmd_next(&cron_expr, count),
         Commands::Logs { target, count, output, format } => cmd_logs(&target, count, output, &format),
         Commands::Resume { target, prompt, previous } => cmd_resume(target.as_deref(), prompt.as_deref(), previous),
@@ -396,10 +410,11 @@ fn cmd_daemon_blocking() -> boo::error::Result<()> {
     Ok(())
 }
 
-async fn cmd_run(target: &str, no_notify: bool, follow: bool, interactive: bool, trust_all_tools: bool) -> boo::error::Result<()> {
+async fn cmd_run(target: &str, no_notify: bool, follow: bool, interactive: bool, trust_all_tools: bool, trust_tools: Option<String>) -> boo::error::Result<()> {
     let store = JobStore::new()?;
     let mut job = resolve_job(&store, target)?;
     if trust_all_tools { job.trust_all_tools = true; }
+    if let Some(ref tools) = trust_tools { job.trust_tools = Some(tools.clone()); }
 
     if interactive {
         return launch_interactive_session(&job.working_dir, job.agent.as_deref(), Some(&job.prompt), None);
@@ -475,9 +490,9 @@ async fn cmd_add(
     prompt: Option<String>, command: Option<String>, dir: Option<PathBuf>, agent: Option<String>, model: Option<String>,
     timeout: Option<u64>, timezone: Option<String>, delete_after_run: bool,
     open_artifact: Option<String>, retry: u32, retry_delay: u64, notify_start: bool,
-    trust_all_tools: bool, runner: Option<String>,
+    trust_all_tools: bool, trust_tools: Option<String>, runner: Option<String>,
+    description: Option<String>,
 ) -> boo::error::Result<()> {
-    // Require prompt or command
     if prompt.is_none() && command.is_none() {
         return Err(boo::error::BooError::Other("Must specify --prompt or --command".into()));
     }
@@ -517,8 +532,10 @@ async fn cmd_add(
     job.retry_delay_secs = retry_delay;
     job.notify_start = notify_start;
     job.trust_all_tools = trust_all_tools;
+    job.trust_tools = trust_tools;
     job.runner = if command.is_some() && runner.is_none() { Some("shell".into()) } else { runner };
     job.command = command;
+    job.description = description;
 
     if let Some(cron_str) = cron {
         cron_eval::next_occurrence(&cron_str, Utc::now())?;
@@ -566,7 +583,8 @@ async fn cmd_edit(
     dir: Option<PathBuf>, agent: Option<String>, model: Option<String>,
     timeout: Option<u64>, timezone: Option<String>, open_artifact: Option<String>,
     retry: Option<u32>, retry_delay: Option<u64>, notify_start: Option<bool>,
-    trust_all_tools: Option<bool>, runner: Option<String>,
+    trust_all_tools: Option<bool>, trust_tools: Option<String>, runner: Option<String>,
+    description: Option<String>,
 ) -> boo::error::Result<()> {
     let store = JobStore::new()?;
     let mut job = resolve_job(&store, target)?;
@@ -617,7 +635,12 @@ async fn cmd_edit(
     if let Some(v) = retry_delay { job.retry_delay_secs = v; changes.push(format!("retry_delay → {v}s")); }
     if let Some(v) = notify_start { job.notify_start = v; changes.push(format!("notify_start → {v}")); }
     if let Some(v) = trust_all_tools { job.trust_all_tools = v; changes.push(format!("trust_all_tools → {v}")); }
+    if let Some(v) = trust_tools {
+        if v.is_empty() { job.trust_tools = None; changes.push("trust_tools → (cleared)".into()); }
+        else { job.trust_tools = Some(v.clone()); changes.push(format!("trust_tools → {v}")); }
+    }
     if let Some(v) = runner { job.runner = Some(v.clone()); changes.push(format!("runner → {v}")); }
+    if let Some(v) = description { job.description = Some(v.clone()); changes.push(format!("description → {v}")); }
 
     if changes.is_empty() {
         println!("No changes specified.");
@@ -682,6 +705,10 @@ fn cmd_list(format: &str) -> boo::error::Result<()> {
                     "artifact": job.open_artifact.as_deref().unwrap_or("-"),
                     "artifact_file": job.open_artifact.as_ref().and_then(|a| boo::job::resolve_artifact(&job.working_dir, a).map(|p| p.to_string_lossy().to_string())),
                     "working_dir": job.working_dir.to_string_lossy().replace(&home, "~"),
+                    "prompt": if job.prompt.is_empty() { None } else { Some(&job.prompt) },
+                    "command": &job.command,
+                    "agent": &job.agent,
+                    "description": &job.description,
                 })
             }).collect();
             println!("{}", serde_json::to_string_pretty(&items).unwrap());
