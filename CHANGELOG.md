@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-03-05
+
+### Bug Fixes
+- Kill entire process group on timeout, preventing orphaned `kiro-cli-chat` processes that survive after the parent wrapper is killed
+- Daemon status correctly reports stopped when pid file is missing
+
+### Features
+- `--trust-tools` flag for selective tool trust per job
+- `--description` field for human-readable job descriptions
+
 ## [0.3.0] - 2026-02-26
 
 ### New Commands
