@@ -86,6 +86,12 @@ pub fn get_runner(job: &Job) -> Box<dyn Runner> {
 
 /// Execute a job, capturing output to log file.
 pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<ExecutionResult> {
+    // Ensure working dir and log dir exist
+    tokio::fs::create_dir_all(&job.working_dir).await.map_err(BooError::Io)?;
+    if let Some(parent) = log_path.parent() {
+        tokio::fs::create_dir_all(parent).await.map_err(BooError::Io)?;
+    }
+
     let runner = get_runner(job);
     let start = Instant::now();
     let timeout_secs = job.timeout_secs.unwrap_or(config.default_timeout_secs);
