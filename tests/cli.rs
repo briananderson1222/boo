@@ -346,7 +346,7 @@ fn test_parse_duration_via_every() {
 fn test_add_command_shell_job() {
     let dir = tempfile::tempdir().unwrap();
     let mut cmd = boo();
-    cmd.env("HOME", dir.path())
+    cmd.env("HOME", dir.path()).env("USERPROFILE", dir.path())
         .args([
             "add",
             "--name",
@@ -365,7 +365,7 @@ fn test_add_command_shell_job() {
 fn test_add_no_prompt_no_command_fails() {
     let dir = tempfile::tempdir().unwrap();
     let mut cmd = boo();
-    cmd.env("HOME", dir.path())
+    cmd.env("HOME", dir.path()).env("USERPROFILE", dir.path())
         .args(["add", "--name", "fail-test", "--every", "1h"])
         .assert()
         .failure()
@@ -377,7 +377,7 @@ fn test_list_format_json() {
     let dir = tempfile::tempdir().unwrap();
     // Add a job first
     boo()
-        .env("HOME", dir.path())
+        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
         .args([
             "add",
             "--name",
@@ -391,7 +391,7 @@ fn test_list_format_json() {
         .success();
     // List as JSON
     boo()
-        .env("HOME", dir.path())
+        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
         .args(["list", "--format", "json"])
         .assert()
         .success()
@@ -412,14 +412,14 @@ fn test_run_new_window_flag_accepted() {
 fn test_list_format_csv() {
     let dir = tempfile::tempdir().unwrap();
     boo()
-        .env("HOME", dir.path())
+        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
         .args([
             "add", "--name", "csv-test", "--every", "1h", "--prompt", "hello",
         ])
         .assert()
         .success();
     boo()
-        .env("HOME", dir.path())
+        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
         .args(["list", "--format", "csv"])
         .assert()
         .success()
@@ -430,7 +430,7 @@ fn test_list_format_csv() {
 fn test_wait_not_running() {
     let dir = tempfile::tempdir().unwrap();
     boo()
-        .env("HOME", dir.path())
+        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
         .args([
             "add",
             "--name",
@@ -443,7 +443,7 @@ fn test_wait_not_running() {
         .assert()
         .success();
     boo()
-        .env("HOME", dir.path())
+        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
         .args(["wait", "wait-test"])
         .assert()
         .success()
@@ -500,7 +500,7 @@ fn test_running_json_empty() {
 fn test_kill_not_running() {
     let dir = tempfile::tempdir().unwrap();
     boo()
-        .env("HOME", dir.path())
+        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
         .args([
             "add",
             "--name",
@@ -513,7 +513,7 @@ fn test_kill_not_running() {
         .assert()
         .success();
     boo()
-        .env("HOME", dir.path())
+        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
         .args(["kill", "kill-test"])
         .assert()
         .success()
@@ -641,7 +641,7 @@ fn test_clean_keep_logs() {
 fn test_list_json_has_running_field() {
     let dir = tempfile::tempdir().unwrap();
     boo()
-        .env("HOME", dir.path())
+        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
         .args([
             "add",
             "--name",
@@ -654,7 +654,7 @@ fn test_list_json_has_running_field() {
         .assert()
         .success();
     boo()
-        .env("HOME", dir.path())
+        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
         .args(["list", "--format", "json"])
         .assert()
         .success()
