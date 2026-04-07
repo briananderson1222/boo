@@ -62,9 +62,15 @@ impl Config {
             match std::fs::read_to_string(&path) {
                 Ok(s) => match serde_json::from_str(&s) {
                     Ok(c) => return c,
-                    Err(e) => eprintln!("Warning: malformed config at {}: {e}, using defaults", path.display()),
+                    Err(e) => eprintln!(
+                        "Warning: malformed config at {}: {e}, using defaults",
+                        path.display()
+                    ),
                 },
-                Err(e) => eprintln!("Warning: cannot read config at {}: {e}, using defaults", path.display()),
+                Err(e) => eprintln!(
+                    "Warning: cannot read config at {}: {e}, using defaults",
+                    path.display()
+                ),
             }
         }
         Self::default()
@@ -100,7 +106,7 @@ pub fn runs_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_default_config() {
         let config = Config::default();
@@ -109,7 +115,7 @@ mod tests {
         assert_eq!(config.max_log_runs, 50);
         assert_eq!(config.heartbeat_secs, 60);
     }
-    
+
     #[test]
     fn test_config_serialization_roundtrip() {
         let config = Config {

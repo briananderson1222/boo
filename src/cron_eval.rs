@@ -3,8 +3,12 @@ use chrono::{DateTime, Duration, Utc};
 use croner::Cron;
 
 /// Parse and return next cron occurrence after `from`.
-pub fn next_occurrence(cron_expr: &str, from: DateTime<Utc>) -> crate::error::Result<DateTime<Utc>> {
-    let cron: Cron = cron_expr.parse()
+pub fn next_occurrence(
+    cron_expr: &str,
+    from: DateTime<Utc>,
+) -> crate::error::Result<DateTime<Utc>> {
+    let cron: Cron = cron_expr
+        .parse()
         .map_err(|e: croner::errors::CronError| crate::error::BooError::CronParse(e.to_string()))?;
     cron.find_next_occurrence(&from, false)
         .map_err(|e| crate::error::BooError::CronParse(e.to_string()))
@@ -32,7 +36,11 @@ pub fn is_overdue(job: &Job, now: DateTime<Utc>) -> bool {
 /// Compute the next fire time for display purposes.
 pub fn next_fire_time(job: &Job, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     if let Some(at_time) = job.at_time {
-        return if job.last_run.is_none() { Some(at_time) } else { None };
+        return if job.last_run.is_none() {
+            Some(at_time)
+        } else {
+            None
+        };
     }
     if let Some(every_secs) = job.every_secs {
         let reference = job.last_run.unwrap_or(job.created_at);
@@ -46,7 +54,9 @@ pub fn missed_count(cron_expr: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> 
     let mut count = 0u32;
     let mut current = from;
     while let Ok(next) = next_occurrence(cron_expr, current) {
-        if next > to || count >= 1000 { break; }
+        if next > to || count >= 1000 {
+            break;
+        }
         count += 1;
         current = next;
     }
@@ -54,7 +64,11 @@ pub fn missed_count(cron_expr: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> 
 }
 
 /// Return the next N cron occurrences from `from` for preview.
-pub fn next_n_occurrences(cron_expr: &str, from: DateTime<Utc>, n: usize) -> crate::error::Result<Vec<DateTime<Utc>>> {
+pub fn next_n_occurrences(
+    cron_expr: &str,
+    from: DateTime<Utc>,
+    n: usize,
+) -> crate::error::Result<Vec<DateTime<Utc>>> {
     let mut occurrences = Vec::with_capacity(n);
     let mut current = from;
     for _ in 0..n {
@@ -70,7 +84,6 @@ mod tests {
     use super::*;
     use crate::job::Job;
     use proptest::prelude::*;
-    
 
     prop_compose! {
         fn arb_cron()(min in 0..60u32, hour in 0..24u32, dom in 1..29u32, month in 1..13u32, dow in 0..7u32) -> String {

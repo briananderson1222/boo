@@ -9,22 +9,22 @@ use std::process::Command;
 /// Returns the path of the installed service file.
 pub fn install() -> Result<std::path::PathBuf> {
     let binary_path = get_boo_binary_path()?;
-    
+
     #[cfg(target_os = "macos")]
     {
         install_macos(&binary_path)
     }
-    
+
     #[cfg(target_os = "linux")]
     {
         install_linux(&binary_path)
     }
-    
+
     #[cfg(target_os = "windows")]
     {
         install_windows(&binary_path)
     }
-    
+
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         Err(BooError::Other("Unsupported platform".to_string()))
@@ -37,17 +37,17 @@ pub fn uninstall() -> Result<()> {
     {
         uninstall_macos()
     }
-    
+
     #[cfg(target_os = "linux")]
     {
         uninstall_linux()
     }
-    
+
     #[cfg(target_os = "windows")]
     {
         uninstall_windows()
     }
-    
+
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         Err(BooError::Other("Unsupported platform".to_string()))
@@ -60,17 +60,17 @@ pub fn is_installed() -> bool {
     {
         is_installed_macos()
     }
-    
+
     #[cfg(target_os = "linux")]
     {
         is_installed_linux()
     }
-    
+
     #[cfg(target_os = "windows")]
     {
         is_installed_windows()
     }
-    
+
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         false
@@ -83,7 +83,8 @@ fn get_boo_binary_path() -> Result<PathBuf> {
 
 #[cfg(target_os = "macos")]
 fn install_macos(binary_path: &std::path::Path) -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| BooError::Other("Could not determine home directory".to_string()))?;
+    let home = dirs::home_dir()
+        .ok_or_else(|| BooError::Other("Could not determine home directory".to_string()))?;
 
     // Create .app bundle (required for user-notify native notifications on macOS)
     let app_dir = home.join("Applications/Boo.app");
@@ -99,29 +100,33 @@ fn install_macos(binary_path: &std::path::Path) -> Result<PathBuf> {
 
     let plist_dir = home.join("Library/LaunchAgents");
     std::fs::create_dir_all(&plist_dir)?;
-    
+
     let plist_path = plist_dir.join("com.boo.scheduler.plist");
     let plist_content = generate_plist(&bundle_binary, &boo_dir());
-    
+
     std::fs::write(&plist_path, plist_content)?;
-    
+
     let output = Command::new("launchctl")
         .args(["load", &plist_path.to_string_lossy()])
         .output()?;
-    
+
     if !output.status.success() {
-        return Err(BooError::Other(format!("Failed to load launchd service: {}", String::from_utf8_lossy(&output.stderr))));
+        return Err(BooError::Other(format!(
+            "Failed to load launchd service: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
     }
-    
+
     println!("Created Boo.app at {}", app_dir.display());
     Ok(plist_path)
 }
 
 #[cfg(target_os = "macos")]
 fn uninstall_macos() -> Result<()> {
-    let home = dirs::home_dir().ok_or_else(|| BooError::Other("Could not determine home directory".to_string()))?;
+    let home = dirs::home_dir()
+        .ok_or_else(|| BooError::Other("Could not determine home directory".to_string()))?;
     let plist_path = home.join("Library/LaunchAgents/com.boo.scheduler.plist");
-    
+
     if plist_path.exists() {
         let _ = Command::new("launchctl")
             .args(["unload", &plist_path.to_string_lossy()])
@@ -138,27 +143,29 @@ fn uninstall_macos() -> Result<()> {
     if url_app.exists() {
         std::fs::remove_dir_all(&url_app)?;
     }
-    
+
     Ok(())
 }
 
 #[cfg(target_os = "macos")]
 fn is_installed_macos() -> bool {
     let home = dirs::home_dir().unwrap_or_default();
-    home.join("Library/LaunchAgents/com.boo.scheduler.plist").exists()
+    home.join("Library/LaunchAgents/com.boo.scheduler.plist")
+        .exists()
 }
 
 #[cfg(target_os = "linux")]
 fn install_linux(binary_path: &std::path::Path) -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| BooError::Other("Could not determine home directory".to_string()))?;
+    let home = dirs::home_dir()
+        .ok_or_else(|| BooError::Other("Could not determine home directory".to_string()))?;
     let systemd_dir = home.join(".config/systemd/user");
     std::fs::create_dir_all(&systemd_dir)?;
-    
+
     let service_path = systemd_dir.join("boo.service");
     let service_content = generate_systemd_unit(binary_path);
-    
+
     std::fs::write(&service_path, service_content)?;
-    
+
     // Register boo:// URL scheme via .desktop file
     let apps_dir = home.join(".local/share/applications");
     std::fs::create_dir_all(&apps_dir)?;
@@ -166,17 +173,19 @@ fn install_linux(binary_path: &std::path::Path) -> Result<PathBuf> {
         "[Desktop Entry]\nName=Boo\nExec={} %u\nType=Application\nNoDisplay=true\nMimeType=x-scheme-handler/boo;\n",
         binary_path.display()
     ))?;
-    let _ = Command::new("xdg-mime").args(["default", "boo-handler.desktop", "x-scheme-handler/boo"]).output();
+    let _ = Command::new("xdg-mime")
+        .args(["default", "boo-handler.desktop", "x-scheme-handler/boo"])
+        .output();
 
     // Reload systemd and enable service
     let reload_output = Command::new("systemctl")
         .args(["--user", "daemon-reload"])
         .output();
-    
+
     let enable_output = Command::new("systemctl")
         .args(["--user", "enable", "boo"])
         .output();
-    
+
     if let (Ok(reload), Ok(enable)) = (reload_output, enable_output) {
         if !reload.status.success() || !enable.status.success() {
             print_crontab_instructions(binary_path);
@@ -184,33 +193,34 @@ fn install_linux(binary_path: &std::path::Path) -> Result<PathBuf> {
     } else {
         print_crontab_instructions(binary_path);
     }
-    
+
     Ok(service_path)
 }
 
 #[cfg(target_os = "linux")]
 fn uninstall_linux() -> Result<()> {
-    let home = dirs::home_dir().ok_or_else(|| BooError::Other("Could not determine home directory".to_string()))?;
+    let home = dirs::home_dir()
+        .ok_or_else(|| BooError::Other("Could not determine home directory".to_string()))?;
     let service_path = home.join(".config/systemd/user/boo.service");
-    
+
     if service_path.exists() {
         // Disable and stop service
         let _ = Command::new("systemctl")
             .args(["--user", "disable", "boo"])
             .output();
-        
+
         let _ = Command::new("systemctl")
             .args(["--user", "stop", "boo"])
             .output();
-        
+
         std::fs::remove_file(service_path)?;
-        
+
         // Reload systemd
         let _ = Command::new("systemctl")
             .args(["--user", "daemon-reload"])
             .output();
     }
-    
+
     Ok(())
 }
 
@@ -243,10 +253,14 @@ fn install_windows(binary_path: &std::path::Path) -> Result<PathBuf> {
     let output = Command::new("schtasks")
         .args([
             "/Create",
-            "/TN", TASK_NAME,
-            "/TR", &format!("\"{}\" daemon", bin),
-            "/SC", "ONLOGON",
-            "/RL", "LIMITED",
+            "/TN",
+            TASK_NAME,
+            "/TR",
+            &format!("\"{}\" daemon", bin),
+            "/SC",
+            "ONLOGON",
+            "/RL",
+            "LIMITED",
             "/F",
         ])
         .output()
@@ -270,9 +284,37 @@ fn install_windows(binary_path: &std::path::Path) -> Result<PathBuf> {
     }
 
     // Register boo:// URL scheme
-    let _ = Command::new("reg").args(["add", "HKCU\\Software\\Classes\\boo", "/ve", "/d", "URL:Boo Protocol", "/f"]).output();
-    let _ = Command::new("reg").args(["add", "HKCU\\Software\\Classes\\boo", "/v", "URL Protocol", "/d", "", "/f"]).output();
-    let _ = Command::new("reg").args(["add", "HKCU\\Software\\Classes\\boo\\shell\\open\\command", "/ve", "/d", &format!("\"{}\" \"%1\"", bin), "/f"]).output();
+    let _ = Command::new("reg")
+        .args([
+            "add",
+            "HKCU\\Software\\Classes\\boo",
+            "/ve",
+            "/d",
+            "URL:Boo Protocol",
+            "/f",
+        ])
+        .output();
+    let _ = Command::new("reg")
+        .args([
+            "add",
+            "HKCU\\Software\\Classes\\boo",
+            "/v",
+            "URL Protocol",
+            "/d",
+            "",
+            "/f",
+        ])
+        .output();
+    let _ = Command::new("reg")
+        .args([
+            "add",
+            "HKCU\\Software\\Classes\\boo\\shell\\open\\command",
+            "/ve",
+            "/d",
+            &format!("\"{}\" \"%1\"", bin),
+            "/f",
+        ])
+        .output();
 
     println!("Created scheduled task '{}' (runs at logon)", TASK_NAME);
     println!("Registered boo:// URL scheme");
@@ -294,12 +336,17 @@ fn uninstall_windows() -> Result<()> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         // Not an error if the task doesn't exist
         if !stderr.contains("does not exist") && !stderr.contains("cannot find") {
-            return Err(BooError::Other(format!("Failed to remove scheduled task: {}", stderr)));
+            return Err(BooError::Other(format!(
+                "Failed to remove scheduled task: {}",
+                stderr
+            )));
         }
     }
 
     // Remove boo:// URL scheme
-    let _ = Command::new("reg").args(["delete", "HKCU\\Software\\Classes\\boo", "/f"]).output();
+    let _ = Command::new("reg")
+        .args(["delete", "HKCU\\Software\\Classes\\boo", "/f"])
+        .output();
 
     // Clean up legacy startup bat if present
     if let Some(home) = dirs::home_dir() {
@@ -323,7 +370,6 @@ fn is_installed_windows() -> bool {
         .unwrap_or(false)
 }
 
-
 #[cfg(target_os = "macos")]
 static EMBEDDED_ICON: &[u8] = include_bytes!("../assets/boo.icns");
 
@@ -337,7 +383,9 @@ fn generate_app_bundle(binary_path: &std::path::Path, app_dir: &std::path::Path)
 
     // Copy binary into bundle
     let dest = macos_dir.join("boo");
-    if dest.exists() { std::fs::remove_file(&dest)?; }
+    if dest.exists() {
+        std::fs::remove_file(&dest)?;
+    }
     std::fs::copy(binary_path, &dest)?;
 
     // Icon: user override > embedded default
@@ -349,7 +397,9 @@ fn generate_app_bundle(binary_path: &std::path::Path, app_dir: &std::path::Path)
         std::fs::write(&icon_dest, EMBEDDED_ICON)?;
     }
 
-    std::fs::write(contents.join("Info.plist"), r#"<?xml version="1.0" encoding="UTF-8"?>
+    std::fs::write(
+        contents.join("Info.plist"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -366,7 +416,8 @@ fn generate_app_bundle(binary_path: &std::path::Path, app_dir: &std::path::Path)
 	<key>LSUIElement</key>
 	<true/>
 </dict>
-</plist>"#)?;
+</plist>"#,
+    )?;
 
     // Ad-hoc codesign
     let _ = Command::new("codesign")
@@ -383,21 +434,32 @@ fn generate_url_handler(boo_binary: &std::path::Path, app_dir: &std::path::Path)
     std::fs::create_dir_all(&macos_dir)?;
 
     // Compile the Swift URL handler
-    let swift_src = format!(r#"import Cocoa
+    let swift_src = format!(
+        r#"import Cocoa
 class D:NSObject,NSApplicationDelegate{{func application(_ a:NSApplication,open urls:[URL]){{for u in urls{{let t=Process();t.executableURL=URL(fileURLWithPath:"{}");t.arguments=[u.absoluteString];try? t.run()}};NSApp.terminate(nil)}}}};let a=NSApplication.shared;a.delegate=D();a.run()"#,
-        boo_binary.to_string_lossy());
+        boo_binary.to_string_lossy()
+    );
 
     let src_path = std::env::temp_dir().join("boo-url-handler.swift");
     std::fs::write(&src_path, &swift_src)?;
 
     let output = Command::new("swiftc")
-        .args([src_path.to_str().unwrap(), "-o", macos_dir.join("BooURL").to_str().unwrap()])
+        .args([
+            src_path.to_str().unwrap(),
+            "-o",
+            macos_dir.join("BooURL").to_str().unwrap(),
+        ])
         .output()?;
     if !output.status.success() {
-        return Err(BooError::Other(format!("Failed to compile URL handler: {}", String::from_utf8_lossy(&output.stderr))));
+        return Err(BooError::Other(format!(
+            "Failed to compile URL handler: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
     }
 
-    std::fs::write(contents.join("Info.plist"), r#"<?xml version="1.0" encoding="UTF-8"?>
+    std::fs::write(
+        contents.join("Info.plist"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -423,7 +485,8 @@ class D:NSObject,NSApplicationDelegate{{func application(_ a:NSApplication,open 
 		</dict>
 	</array>
 </dict>
-</plist>"#)?;
+</plist>"#,
+    )?;
 
     let _ = Command::new("codesign")
         .args(["--force", "--sign", "-", &app_dir.to_string_lossy()])
@@ -437,9 +500,17 @@ class D:NSObject,NSApplicationDelegate{{func application(_ a:NSApplication,open 
     Ok(())
 }
 pub fn generate_plist(binary_path: &std::path::Path, boo_dir: &std::path::Path) -> String {
-    let home = dirs::home_dir().map(|h| h.to_string_lossy().to_string()).unwrap_or_default();
-    let user_path = std::env::var("PATH").unwrap_or_else(|_| format!("/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:{}/.local/bin", home));
-    format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+    let home = dirs::home_dir()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let user_path = std::env::var("PATH").unwrap_or_else(|_| {
+        format!(
+            "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:{}/.local/bin",
+            home
+        )
+    });
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -464,11 +535,17 @@ pub fn generate_plist(binary_path: &std::path::Path, boo_dir: &std::path::Path) 
         <string>{}</string>
     </dict>
 </dict>
-</plist>"#, binary_path.display(), boo_dir.display(), boo_dir.display(), user_path)
+</plist>"#,
+        binary_path.display(),
+        boo_dir.display(),
+        boo_dir.display(),
+        user_path
+    )
 }
 
 pub fn generate_systemd_unit(binary_path: &std::path::Path) -> String {
-    format!(r#"[Unit]
+    format!(
+        r#"[Unit]
 Description=Boo Scheduler Daemon
 After=default.target
 
@@ -479,7 +556,9 @@ RestartSec=5
 
 [Install]
 WantedBy=default.target
-"#, binary_path.display())
+"#,
+        binary_path.display()
+    )
 }
 
 #[cfg(test)]
@@ -493,7 +572,7 @@ mod tests {
         let binary_path = PathBuf::from("/usr/local/bin/boo");
         let boo_dir = PathBuf::from("/Users/test/.boo");
         let result = generate_plist(&binary_path, &boo_dir);
-        
+
         assert!(result.contains("com.boo.scheduler"));
         assert!(result.contains("/usr/local/bin/boo"));
         assert!(result.contains("daemon"));
@@ -506,7 +585,7 @@ mod tests {
     fn test_generate_systemd_unit() {
         let binary_path = PathBuf::from("/usr/local/bin/boo");
         let result = generate_systemd_unit(&binary_path);
-        
+
         assert!(result.contains("Boo Scheduler Daemon"));
         assert!(result.contains("/usr/local/bin/boo daemon"));
         assert!(result.contains("Restart=always"));

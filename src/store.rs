@@ -104,7 +104,9 @@ impl JobStore {
     pub fn update_job(&self, job: &Job) -> Result<()> {
         self.with_lock(|| {
             let mut jobs = self.read_jobs_unlocked()?;
-            let pos = jobs.iter().position(|j| j.id == job.id)
+            let pos = jobs
+                .iter()
+                .position(|j| j.id == job.id)
                 .ok_or(BooError::JobNotFound(job.id))?;
             jobs[pos] = job.clone();
             self.write_jobs_unlocked(&jobs)
@@ -114,7 +116,8 @@ impl JobStore {
     pub fn get_job(&self, id: Uuid) -> Result<Job> {
         self.with_lock(|| {
             let jobs = self.read_jobs_unlocked()?;
-            jobs.into_iter().find(|j| j.id == id)
+            jobs.into_iter()
+                .find(|j| j.id == id)
                 .ok_or(BooError::JobNotFound(id))
         })
     }
@@ -136,7 +139,8 @@ impl JobStore {
             return Ok(Vec::new());
         }
         let file = File::open(log_path)?;
-        let lines: Vec<String> = BufReader::new(file).lines()
+        let lines: Vec<String> = BufReader::new(file)
+            .lines()
             .collect::<std::io::Result<Vec<_>>>()?;
         let mut records = Vec::new();
         for line in lines.iter().rev().take(limit) {
@@ -161,13 +165,18 @@ impl JobStore {
     }
 
     pub fn list_active_runs(&self) -> Vec<ActiveRun> {
-        let Ok(entries) = std::fs::read_dir(&self.runs_dir) else { return Vec::new() };
-        entries.filter_map(|e| e.ok())
+        let Ok(entries) = std::fs::read_dir(&self.runs_dir) else {
+            return Vec::new();
+        };
+        entries
+            .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().is_some_and(|ext| ext == "active"))
             .filter_map(|e| {
                 let content = std::fs::read_to_string(e.path()).ok()?;
                 let run: ActiveRun = serde_json::from_str(&content).ok()?;
-                if is_pid_alive(run.pid) { Some(run) } else {
+                if is_pid_alive(run.pid) {
+                    Some(run)
+                } else {
                     // Stale .active file — process died without cleanup
                     let _ = std::fs::remove_file(e.path());
                     None
@@ -180,7 +189,11 @@ impl JobStore {
         let path = self.runs_dir.join(format!("{}.active", job_id));
         let content = std::fs::read_to_string(path).ok()?;
         let run: ActiveRun = serde_json::from_str(&content).ok()?;
-        if is_pid_alive(run.pid) { Some(run) } else { None }
+        if is_pid_alive(run.pid) {
+            Some(run)
+        } else {
+            None
+        }
     }
 
     pub fn rotate_logs(&self, job_id: Uuid, max_runs: usize) -> Result<()> {
@@ -189,7 +202,8 @@ impl JobStore {
             return Ok(());
         }
         let file = File::open(&log_path)?;
-        let lines: Vec<String> = BufReader::new(file).lines()
+        let lines: Vec<String> = BufReader::new(file)
+            .lines()
             .collect::<std::io::Result<Vec<_>>>()?;
         if lines.len() <= max_runs {
             return Ok(());
@@ -270,8 +284,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let store = JobStore::with_dir(dir.path().to_path_buf()).unwrap();
         let j1 = test_job();
-        let mut j2 = test_job(); j2.name = "test2".into();
-        let mut j3 = test_job(); j3.name = "test3".into();
+        let mut j2 = test_job();
+        j2.name = "test2".into();
+        let mut j3 = test_job();
+        j3.name = "test3".into();
         store.add_job(j1.clone()).unwrap();
         store.add_job(j2.clone()).unwrap();
         store.add_job(j3.clone()).unwrap();
@@ -284,10 +300,12 @@ mod tests {
         let dir = tempdir().unwrap();
         let store = JobStore::with_dir(dir.path().to_path_buf()).unwrap();
         let j1 = test_job();
-        let mut j2 = test_job(); j2.name = "test2".into();
+        let mut j2 = test_job();
+        j2.name = "test2".into();
         store.add_job(j1.clone()).unwrap();
         store.add_job(j2.clone()).unwrap();
-        let mut u1 = j1.clone(); u1.name = "updated".into();
+        let mut u1 = j1.clone();
+        u1.name = "updated".into();
         store.update_job(&u1).unwrap();
         let jobs = store.load_jobs().unwrap();
         assert_eq!(jobs.len(), 2);
@@ -301,9 +319,16 @@ mod tests {
         let store = JobStore::with_dir(dir.path().to_path_buf()).unwrap();
         let job_id = uuid::Uuid::new_v4();
         let record = RunRecord {
-            job_id, job_name: "test".into(), fired_at: Utc::now(),
-            scheduled_for: Utc::now(), missed_count: 0, duration_secs: 1.5,
-            exit_code: Some(0), success: true, output_path: PathBuf::from("/tmp/test.log"), manual: false,
+            job_id,
+            job_name: "test".into(),
+            fired_at: Utc::now(),
+            scheduled_for: Utc::now(),
+            missed_count: 0,
+            duration_secs: 1.5,
+            exit_code: Some(0),
+            success: true,
+            output_path: PathBuf::from("/tmp/test.log"),
+            manual: false,
         };
         store.append_run_record(&record).unwrap();
         let records = store.load_run_records(job_id, 10).unwrap();
@@ -318,9 +343,16 @@ mod tests {
         let job_id = uuid::Uuid::new_v4();
         for i in 0..5 {
             let record = RunRecord {
-                job_id, job_name: format!("test-{i}"), fired_at: Utc::now(),
-                scheduled_for: Utc::now(), missed_count: 0, duration_secs: 1.0,
-                exit_code: Some(0), success: true, output_path: PathBuf::from("/tmp/test.log"), manual: false,
+                job_id,
+                job_name: format!("test-{i}"),
+                fired_at: Utc::now(),
+                scheduled_for: Utc::now(),
+                missed_count: 0,
+                duration_secs: 1.0,
+                exit_code: Some(0),
+                success: true,
+                output_path: PathBuf::from("/tmp/test.log"),
+                manual: false,
             };
             store.append_run_record(&record).unwrap();
         }
@@ -334,7 +366,10 @@ mod tests {
     fn test_load_run_records_empty() {
         let dir = tempdir().unwrap();
         let store = JobStore::with_dir(dir.path().to_path_buf()).unwrap();
-        assert!(store.load_run_records(uuid::Uuid::new_v4(), 10).unwrap().is_empty());
+        assert!(store
+            .load_run_records(uuid::Uuid::new_v4(), 10)
+            .unwrap()
+            .is_empty());
     }
 
     proptest! {

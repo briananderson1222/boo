@@ -1,5 +1,5 @@
 use crate::clock::Clock;
-use crate::config::{Config, runs_dir};
+use crate::config::{runs_dir, Config};
 use crate::cron_eval;
 use crate::executor;
 use crate::job::{self, Job, RunRecord};
@@ -60,26 +60,37 @@ impl<C: Clock + 'static> Scheduler<C> {
     async fn tick(&self) {
         let store = match self.create_store() {
             Ok(s) => s,
-            Err(e) => { eprintln!("Failed to create store: {e}"); return; }
+            Err(e) => {
+                eprintln!("Failed to create store: {e}");
+                return;
+            }
         };
         let jobs = match store.load_jobs() {
             Ok(j) => j,
-            Err(e) => { eprintln!("Failed to load jobs: {e}"); return; }
+            Err(e) => {
+                eprintln!("Failed to load jobs: {e}");
+                return;
+            }
         };
 
         let now = self.clock.now();
         let mut to_fire = Vec::new();
 
         for job in jobs {
-            if !job.enabled || !cron_eval::is_overdue(&job, now) { continue; }
+            if !job.enabled || !cron_eval::is_overdue(&job, now) {
+                continue;
+            }
             let running = self.running_jobs.lock().await;
-            if running.contains(&job.id) && !job.allow_overlap { continue; }
+            if running.contains(&job.id) && !job.allow_overlap {
+                continue;
+            }
             drop(running);
             to_fire.push(job);
         }
 
         // Send start notifications for jobs with notify_start
-        let start_names: Vec<&str> = to_fire.iter()
+        let start_names: Vec<&str> = to_fire
+            .iter()
             .filter(|j| j.notify_start)
             .map(|j| j.name.as_str())
             .collect();
@@ -89,7 +100,9 @@ impl<C: Clock + 'static> Scheduler<C> {
                     sender.send(NotifyRequest {
                         summary: format!("🚀 Job '{}' starting...", name),
                         body: format!("Run 'boo disable {}' to pause", name),
-                        open: None, working_dir: None, job_name: Some(name.to_string()),
+                        open: None,
+                        working_dir: None,
+                        job_name: Some(name.to_string()),
                     });
                 }
             } else {
@@ -100,11 +113,14 @@ impl<C: Clock + 'static> Scheduler<C> {
         // Webhook: notify started for ALL fired jobs (not just notify_start ones)
         if let Some(ref url) = self.config.notify_webhook {
             for job in &to_fire {
-                notifier::notify_webhook(url, serde_json::json!({
-                    "event": "job.started",
-                    "job": job.name,
-                    "id": job.id.to_string()[..8],
-                }));
+                notifier::notify_webhook(
+                    url,
+                    serde_json::json!({
+                        "event": "job.started",
+                        "job": job.name,
+                        "id": job.id.to_string()[..8],
+                    }),
+                );
             }
         }
 
@@ -122,18 +138,31 @@ impl<C: Clock + 'static> Scheduler<C> {
         let webhook_url = self.config.notify_webhook.clone();
 
         tokio::spawn(async move {
-            { running_jobs.lock().await.insert(job.id); }
+            {
+                running_jobs.lock().await.insert(job.id);
+            }
 
             // Track active run on disk for boo status/wait
             if let Ok(store) = Self::make_store(&store_dir) {
                 let active = crate::store::ActiveRun {
-                    job_id: job.id, job_name: job.name.clone(),
-                    pid: std::process::id(), started_at: chrono::Utc::now(), manual: false,
+                    job_id: job.id,
+                    job_name: job.name.clone(),
+                    pid: std::process::id(),
+                    started_at: chrono::Utc::now(),
+                    manual: false,
                 };
                 let _ = store.write_active_run(&active);
             }
 
-            let result = Self::execute_with_retry(job.clone(), config, store_dir.clone(), clock, sender.clone(), webhook_url.clone()).await;
+            let result = Self::execute_with_retry(
+                job.clone(),
+                config,
+                store_dir.clone(),
+                clock,
+                sender.clone(),
+                webhook_url.clone(),
+            )
+            .await;
             if let Err(e) = &result {
                 let retries = job.retry_count;
                 let msg = if retries > 0 {
@@ -144,14 +173,19 @@ impl<C: Clock + 'static> Scheduler<C> {
                 eprintln!("Job execution failed for {}: {msg}", job.name);
 
                 // Find latest log file for click-to-open
-                let log_dir = store_dir.as_ref()
+                let log_dir = store_dir
+                    .as_ref()
                     .map(|d| d.join("runs"))
                     .unwrap_or_else(crate::config::runs_dir)
                     .join(job.id.to_string());
-                let latest_log = std::fs::read_dir(&log_dir).ok()
-                    .and_then(|entries| entries.filter_map(|e| e.ok())
-                        .filter(|e| e.path().extension().is_some_and(|ext| ext == "log"))
-                        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok()))
+                let latest_log = std::fs::read_dir(&log_dir)
+                    .ok()
+                    .and_then(|entries| {
+                        entries
+                            .filter_map(|e| e.ok())
+                            .filter(|e| e.path().extension().is_some_and(|ext| ext == "log"))
+                            .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
+                    })
                     .map(|e| e.path().to_string_lossy().to_string());
 
                 if let Some(ref s) = sender {
@@ -167,12 +201,15 @@ impl<C: Clock + 'static> Scheduler<C> {
                 }
 
                 if let Some(ref url) = webhook_url {
-                    notifier::notify_webhook(url, serde_json::json!({
-                        "event": "job.failed",
-                        "job": job.name,
-                        "id": job.id.to_string()[..8],
-                        "error": msg,
-                    }));
+                    notifier::notify_webhook(
+                        url,
+                        serde_json::json!({
+                            "event": "job.failed",
+                            "job": job.name,
+                            "id": job.id.to_string()[..8],
+                            "error": msg,
+                        }),
+                    );
                 }
             }
 
@@ -181,7 +218,9 @@ impl<C: Clock + 'static> Scheduler<C> {
                 store.remove_active_run(job.id);
             }
 
-            { running_jobs.lock().await.remove(&job.id); }
+            {
+                running_jobs.lock().await.remove(&job.id);
+            }
         });
     }
 
@@ -197,7 +236,9 @@ impl<C: Clock + 'static> Scheduler<C> {
         let mut last_err = None;
 
         for attempt in 1..=max_attempts {
-            match Self::execute_job_impl(&job, &config, &store_dir, &clock, &sender, &webhook_url).await {
+            match Self::execute_job_impl(&job, &config, &store_dir, &clock, &sender, &webhook_url)
+                .await
+            {
                 Ok(success) => {
                     if success {
                         // Delete one-shot jobs after success
@@ -209,8 +250,10 @@ impl<C: Clock + 'static> Scheduler<C> {
                     }
                     // Job ran but failed (non-zero exit)
                     if attempt < max_attempts {
-                        eprintln!("Job '{}' failed (attempt {attempt}/{max_attempts}), retrying in {}s",
-                            job.name, job.retry_delay_secs);
+                        eprintln!(
+                            "Job '{}' failed (attempt {attempt}/{max_attempts}), retrying in {}s",
+                            job.name, job.retry_delay_secs
+                        );
                         tokio::time::sleep(Duration::from_secs(job.retry_delay_secs)).await;
                     }
                     last_err = Some(crate::error::BooError::JobFailed(1));
@@ -257,7 +300,8 @@ impl<C: Clock + 'static> Scheduler<C> {
         };
 
         // Log directory
-        let base_runs = store_dir.as_ref()
+        let base_runs = store_dir
+            .as_ref()
             .map(|d| d.join("runs"))
             .unwrap_or_else(runs_dir);
         let log_dir = base_runs.join(job.id.to_string());
@@ -291,17 +335,22 @@ impl<C: Clock + 'static> Scheduler<C> {
         notifier::send_notification(job, &result, sender);
 
         if let Some(ref url) = webhook_url {
-            let artifact = job.open_artifact.as_ref()
+            let artifact = job
+                .open_artifact
+                .as_ref()
                 .and_then(|a| job::resolve_artifact(&job.working_dir, a))
                 .map(|p| p.to_string_lossy().to_string());
-            notifier::notify_webhook(url, serde_json::json!({
-                "event": if result.success { "job.completed" } else { "job.failed" },
-                "job": job.name,
-                "id": job.id.to_string()[..8],
-                "success": result.success,
-                "duration_secs": result.duration_secs,
-                "artifact": artifact,
-            }));
+            notifier::notify_webhook(
+                url,
+                serde_json::json!({
+                    "event": if result.success { "job.completed" } else { "job.failed" },
+                    "job": job.name,
+                    "id": job.id.to_string()[..8],
+                    "success": result.success,
+                    "duration_secs": result.duration_secs,
+                    "artifact": artifact,
+                }),
+            );
         }
 
         Ok(result.success)
@@ -340,7 +389,9 @@ mod tests {
     fn test_scheduler_construction() {
         let tmp = TempDir::new().unwrap();
         let scheduler = Scheduler::new(
-            MockClock::new(Utc::now()), test_config(), Some(tmp.path().to_path_buf()),
+            MockClock::new(Utc::now()),
+            test_config(),
+            Some(tmp.path().to_path_buf()),
         );
         assert!(scheduler.running_jobs.try_lock().unwrap().is_empty());
     }
@@ -353,14 +404,23 @@ mod tests {
 
         let mut job = Job::new("fire-test", "* * * * *", "hello", std::env::temp_dir());
         job.last_run = Some(now - chrono::Duration::minutes(2));
-        JobStore::with_dir(dir.clone()).unwrap().add_job(job.clone()).unwrap();
+        JobStore::with_dir(dir.clone())
+            .unwrap()
+            .add_job(job.clone())
+            .unwrap();
 
         let scheduler = Scheduler::new(MockClock::new(now), test_config(), Some(dir.clone()));
         scheduler.tick().await;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-        let records = JobStore::with_dir(dir).unwrap().load_run_records(job.id, 10).unwrap();
-        assert!(!records.is_empty(), "Expected run record for overdue cron job");
+        let records = JobStore::with_dir(dir)
+            .unwrap()
+            .load_run_records(job.id, 10)
+            .unwrap();
+        assert!(
+            !records.is_empty(),
+            "Expected run record for overdue cron job"
+        );
     }
 
     #[tokio::test]
@@ -372,14 +432,23 @@ mod tests {
         let mut job = Job::new("every-test", "", "hello", std::env::temp_dir());
         job.every_secs = Some(60);
         job.last_run = Some(now - chrono::Duration::minutes(2));
-        JobStore::with_dir(dir.clone()).unwrap().add_job(job.clone()).unwrap();
+        JobStore::with_dir(dir.clone())
+            .unwrap()
+            .add_job(job.clone())
+            .unwrap();
 
         let scheduler = Scheduler::new(MockClock::new(now), test_config(), Some(dir.clone()));
         scheduler.tick().await;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-        let records = JobStore::with_dir(dir).unwrap().load_run_records(job.id, 10).unwrap();
-        assert!(!records.is_empty(), "Expected run record for overdue every job");
+        let records = JobStore::with_dir(dir)
+            .unwrap()
+            .load_run_records(job.id, 10)
+            .unwrap();
+        assert!(
+            !records.is_empty(),
+            "Expected run record for overdue every job"
+        );
     }
 
     #[tokio::test]
@@ -390,14 +459,23 @@ mod tests {
 
         let mut job = Job::new("at-test", "", "hello", std::env::temp_dir());
         job.at_time = Some(now - chrono::Duration::minutes(1));
-        JobStore::with_dir(dir.clone()).unwrap().add_job(job.clone()).unwrap();
+        JobStore::with_dir(dir.clone())
+            .unwrap()
+            .add_job(job.clone())
+            .unwrap();
 
         let scheduler = Scheduler::new(MockClock::new(now), test_config(), Some(dir.clone()));
         scheduler.tick().await;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-        let records = JobStore::with_dir(dir).unwrap().load_run_records(job.id, 10).unwrap();
-        assert!(!records.is_empty(), "Expected run record for overdue at job");
+        let records = JobStore::with_dir(dir)
+            .unwrap()
+            .load_run_records(job.id, 10)
+            .unwrap();
+        assert!(
+            !records.is_empty(),
+            "Expected run record for overdue at job"
+        );
     }
 
     #[tokio::test]
@@ -408,13 +486,19 @@ mod tests {
 
         let mut job = Job::new("skip-test", "0 * * * *", "hello", std::env::temp_dir());
         job.last_run = Some(now - chrono::Duration::seconds(30));
-        JobStore::with_dir(dir.clone()).unwrap().add_job(job.clone()).unwrap();
+        JobStore::with_dir(dir.clone())
+            .unwrap()
+            .add_job(job.clone())
+            .unwrap();
 
         let scheduler = Scheduler::new(MockClock::new(now), test_config(), Some(dir.clone()));
         scheduler.tick().await;
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-        let records = JobStore::with_dir(dir).unwrap().load_run_records(job.id, 10).unwrap();
+        let records = JobStore::with_dir(dir)
+            .unwrap()
+            .load_run_records(job.id, 10)
+            .unwrap();
         assert!(records.is_empty(), "Should not fire non-overdue job");
     }
 
@@ -427,13 +511,19 @@ mod tests {
         let mut job = Job::new("disabled-test", "* * * * *", "hello", std::env::temp_dir());
         job.last_run = Some(now - chrono::Duration::minutes(2));
         job.enabled = false;
-        JobStore::with_dir(dir.clone()).unwrap().add_job(job.clone()).unwrap();
+        JobStore::with_dir(dir.clone())
+            .unwrap()
+            .add_job(job.clone())
+            .unwrap();
 
         let scheduler = Scheduler::new(MockClock::new(now), test_config(), Some(dir.clone()));
         scheduler.tick().await;
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-        let records = JobStore::with_dir(dir).unwrap().load_run_records(job.id, 10).unwrap();
+        let records = JobStore::with_dir(dir)
+            .unwrap()
+            .load_run_records(job.id, 10)
+            .unwrap();
         assert!(records.is_empty(), "Should not fire disabled job");
     }
 
@@ -447,21 +537,29 @@ mod tests {
         job.at_time = Some(now - chrono::Duration::minutes(1));
         job.delete_after_run = true;
         let job_id = job.id;
-        JobStore::with_dir(dir.clone()).unwrap().add_job(job).unwrap();
+        JobStore::with_dir(dir.clone())
+            .unwrap()
+            .add_job(job)
+            .unwrap();
 
         let scheduler = Scheduler::new(MockClock::new(now), test_config(), Some(dir.clone()));
         scheduler.tick().await;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         let store = JobStore::with_dir(dir).unwrap();
-        assert!(store.get_job(job_id).is_err(), "Job should be deleted after run");
+        assert!(
+            store.get_job(job_id).is_err(),
+            "Job should be deleted after run"
+        );
     }
 
     #[tokio::test]
     async fn test_shutdown() {
         let tmp = TempDir::new().unwrap();
         let scheduler = Arc::new(Scheduler::new(
-            MockClock::new(Utc::now()), test_config(), Some(tmp.path().to_path_buf()),
+            MockClock::new(Utc::now()),
+            test_config(),
+            Some(tmp.path().to_path_buf()),
         ));
         let s = scheduler.clone();
         tokio::spawn(async move {
@@ -469,6 +567,9 @@ mod tests {
             s.trigger_shutdown();
         });
         let result = tokio::time::timeout(std::time::Duration::from_secs(2), scheduler.run()).await;
-        assert!(result.is_ok(), "run() should return promptly after shutdown");
+        assert!(
+            result.is_ok(),
+            "run() should return promptly after shutdown"
+        );
     }
 }
