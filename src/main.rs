@@ -205,6 +205,25 @@ enum Commands {
         #[arg(long)]
         description: Option<String>,
     },
+    /// Show only currently running jobs
+    Running {
+        /// Output format: table (default), json
+        #[arg(long, default_value = "table")]
+        format: String,
+    },
+    /// Kill an active job run
+    Kill {
+        target: String,
+    },
+    /// Remove completed one-shot jobs
+    Clean {
+        /// Keep log files for removed jobs
+        #[arg(long)]
+        keep_logs: bool,
+        /// Dry run — show what would be removed without removing
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Wait for an active job run to complete
     Wait {
         target: String,
@@ -370,6 +389,9 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
         Commands::Logs { target, count, output, format } => cmd_logs(&target, count, output, &format),
         Commands::Resume { target, prompt, previous } => cmd_resume(target.as_deref(), prompt.as_deref(), previous),
         Commands::Stats { target, format } => cmd_stats(target.as_deref(), &format),
+        Commands::Running { format } => cmd_running(&format),
+        Commands::Kill { target } => cmd_kill(&target),
+        Commands::Clean { keep_logs, dry_run } => cmd_clean(keep_logs, dry_run),
         Commands::Wait { target, interval } => cmd_wait(&target, interval).await,
         Commands::Install => cmd_install(),
         Commands::Uninstall => cmd_uninstall(),
@@ -691,12 +713,17 @@ fn cmd_list(format: &str) -> boo::error::Result<()> {
     }
     let now = Utc::now();
     let home = dirs::home_dir().map(|h| h.to_string_lossy().to_string()).unwrap_or_default();
+    let active_runs = store.list_active_runs();
 
     // Pre-compute rows
     let rows: Vec<_> = jobs.iter().map(|job| {
         let id_short = job.id.to_string()[..8].to_string();
+        let active = active_runs.iter().find(|r| r.job_id == job.id);
         let enabled = if job.enabled { "yes" } else { "no" }.to_string();
-        let next = if !job.enabled {
+        let next = if let Some(a) = active {
+            let elapsed = (now - a.started_at).num_seconds();
+            format!("▶ running ({}s)", elapsed)
+        } else if !job.enabled {
             "disabled".into()
         } else {
             cron_eval::next_fire_time(job, now)
@@ -721,6 +748,7 @@ fn cmd_list(format: &str) -> boo::error::Result<()> {
         "json" => {
             let items: Vec<_> = jobs.iter().map(|job| {
                 let next_fire = if !job.enabled { None } else { cron_eval::next_fire_time(job, now) };
+                let active = active_runs.iter().find(|r| r.job_id == job.id);
                 serde_json::json!({
                     "id": job.id.to_string()[..8],
                     "name": job.name,
@@ -729,6 +757,9 @@ fn cmd_list(format: &str) -> boo::error::Result<()> {
                     "enabled": if job.enabled { "yes" } else { "no" },
                     "next_fire": next_fire.map(|t| t.to_rfc3339()),
                     "last_run": job.last_run.map(|t| t.to_rfc3339()),
+                    "running": active.is_some(),
+                    "pid": active.map(|a| a.pid),
+                    "running_since": active.map(|a| a.started_at.to_rfc3339()),
                     "artifact": job.open_artifact.as_deref().unwrap_or("-"),
                     "artifact_file": job.open_artifact.as_ref().and_then(|a| boo::job::resolve_artifact(&job.working_dir, a).map(|p| p.to_string_lossy().to_string())),
                     "working_dir": job.working_dir.to_string_lossy().replace(&home, "~"),
@@ -934,6 +965,142 @@ fn cmd_resume(target: Option<&str>, prompt: Option<&str>, previous: bool) -> boo
         (boo::config::boo_dir().join("workspace"), None)
     };
     launch_interactive_session(&dir, agent.as_deref(), prompt, Some(previous))
+}
+
+fn cmd_running(format: &str) -> boo::error::Result<()> {
+    let store = JobStore::new()?;
+    let active_runs = store.list_active_runs();
+    let now = Utc::now();
+
+    if format == "json" {
+        let items: Vec<_> = active_runs.iter().map(|run| {
+            let elapsed = (now - run.started_at).num_seconds();
+            serde_json::json!({
+                "job_name": run.job_name,
+                "job_id": run.job_id.to_string()[..8],
+                "pid": run.pid,
+                "source": if run.manual { "manual" } else { "daemon" },
+                "started_at": run.started_at.to_rfc3339(),
+                "elapsed_secs": elapsed,
+            })
+        }).collect();
+        println!("{}", serde_json::to_string_pretty(&items).unwrap());
+        return Ok(());
+    }
+
+    if active_runs.is_empty() {
+        println!("No jobs currently running");
+        return Ok(());
+    }
+
+    println!("{:<20} {:<10} {:>7} {:>10} Source", "Job", "ID", "PID", "Elapsed");
+    println!("{}", "-".repeat(60));
+    for run in &active_runs {
+        let elapsed = (now - run.started_at).num_seconds();
+        let elapsed_str = if elapsed >= 3600 {
+            format!("{}h {}m", elapsed / 3600, (elapsed % 3600) / 60)
+        } else if elapsed >= 60 {
+            format!("{}m {}s", elapsed / 60, elapsed % 60)
+        } else {
+            format!("{}s", elapsed)
+        };
+        let source = if run.manual { "manual" } else { "daemon" };
+        println!("{:<20} {:<10} {:>7} {:>10} {}", run.job_name, &run.job_id.to_string()[..8], run.pid, elapsed_str, source);
+    }
+    Ok(())
+}
+
+fn cmd_kill(target: &str) -> boo::error::Result<()> {
+    let store = JobStore::new()?;
+    let job = resolve_job(&store, target)?;
+    let active = store.get_active_run(job.id);
+
+    match active {
+        None => {
+            println!("Job '{}' is not currently running.", job.name);
+            Ok(())
+        }
+        Some(run) => {
+            println!("Killing '{}' (pid {})...", run.job_name, run.pid);
+            #[cfg(unix)]
+            {
+                // Kill the process group to get all descendants
+                unsafe {
+                    if libc::killpg(run.pid as i32, libc::SIGTERM) != 0 {
+                        // Fallback to direct kill
+                        libc::kill(run.pid as i32, libc::SIGKILL);
+                    }
+                }
+                // Give it a moment, then force kill if still alive
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                if boo::is_pid_alive(run.pid) {
+                    unsafe { libc::killpg(run.pid as i32, libc::SIGKILL); }
+                }
+            }
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &run.pid.to_string(), "/T", "/F"])
+                    .output();
+            }
+            store.remove_active_run(job.id);
+            println!("Killed.");
+            Ok(())
+        }
+    }
+}
+
+fn cmd_clean(keep_logs: bool, dry_run: bool) -> boo::error::Result<()> {
+    let store = JobStore::new()?;
+    let jobs = store.load_jobs()?;
+    let now = Utc::now();
+
+    let done_jobs: Vec<&Job> = jobs.iter()
+        .filter(|j| j.enabled && {
+            // A one-shot is "done" if next_fire is None (already ran) OR
+            // if it's an at_time job whose time has passed (never ran but expired)
+            let next = cron_eval::next_fire_time(j, now);
+            match next {
+                None => true,
+                Some(t) if j.at_time.is_some() && t < now => true,
+                _ => false,
+            }
+        })
+        .collect();
+
+    if done_jobs.is_empty() {
+        println!("No completed one-shot jobs to clean");
+        return Ok(());
+    }
+
+    let label = if dry_run { "Would remove" } else { "Removing" };
+    for job in &done_jobs {
+        println!("{}: {} ({})", label, job.name, &job.id.to_string()[..8]);
+    }
+
+    if dry_run {
+        println!("\n{} job(s) would be removed. Run without --dry-run to apply.", done_jobs.len());
+        return Ok(());
+    }
+
+    let mut removed = 0;
+    for job in &done_jobs {
+        if !keep_logs {
+            // Clean up run records and log files
+            if let Ok(records) = store.load_run_records(job.id, 10_000) {
+                for r in &records {
+                    let _ = std::fs::remove_file(&r.output_path);
+                    let _ = std::fs::remove_file(r.output_path.with_extension("response"));
+                }
+            }
+            let log_path = boo::config::runs_dir().join(format!("{}.jsonl", job.id));
+            let _ = std::fs::remove_file(log_path);
+        }
+        store.remove_job(job.id)?;
+        removed += 1;
+    }
+    println!("\nCleaned {} job(s){}", removed, if keep_logs { " (logs kept)" } else { "" });
+    Ok(())
 }
 
 async fn cmd_wait(target: &str, interval: u64) -> boo::error::Result<()> {

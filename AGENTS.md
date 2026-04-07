@@ -16,7 +16,7 @@ Cross-platform Rust scheduler daemon that fires kiro-cli prompts on cron/at/ever
 
 ```
 src/
-├── main.rs           # CLI entry point (clap) — 16 user commands + hidden internal-notify
+├── main.rs           # CLI entry point (clap) — 19 user commands + hidden internal-notify
 ├── scheduler.rs      # Heartbeat loop, job spawning, retry loop, delete-after-run, notification integration
 ├── store.rs          # Atomic JSON persistence with file locking (single lock scope per mutation)
 ├── executor.rs       # Runner trait (KiroRunner, ShellRunner), subprocess spawning, stdin piping, timeout + kill

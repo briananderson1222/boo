@@ -207,3 +207,108 @@ fn test_status_json_has_active_runs() {
     boo().args(["status", "--format", "json"]).assert().success()
         .stdout(predicate::str::contains("active_runs"));
 }
+
+#[test]
+fn test_running_no_active() {
+    boo().arg("running").assert().success()
+        .stdout(predicate::str::contains("No jobs currently running"));
+}
+
+#[test]
+fn test_running_json_empty() {
+    boo().args(["running", "--format", "json"]).assert().success()
+        .stdout(predicate::str::contains("[]"));
+}
+
+#[test]
+fn test_kill_not_running() {
+    let dir = tempfile::tempdir().unwrap();
+    boo().env("HOME", dir.path())
+        .args(["add", "--name", "kill-test", "--every", "1h", "--prompt", "hello"])
+        .assert().success();
+    boo().env("HOME", dir.path())
+        .args(["kill", "kill-test"])
+        .assert().success()
+        .stdout(predicate::str::contains("not currently running"));
+}
+
+#[test]
+fn test_kill_nonexistent() {
+    boo().args(["kill", "nonexistent-99999"]).assert().failure();
+}
+
+#[test]
+fn test_clean_nothing_to_clean() {
+    let dir = tempfile::tempdir().unwrap();
+    // Add a recurring job (not a one-shot) — should not be cleaned
+    boo().env("HOME", dir.path())
+        .args(["add", "--name", "recurring", "--every", "1h", "--prompt", "hello"])
+        .assert().success();
+    boo().env("HOME", dir.path())
+        .arg("clean")
+        .assert().success()
+        .stdout(predicate::str::contains("No completed one-shot"));
+}
+
+#[test]
+fn test_clean_dry_run() {
+    let dir = tempfile::tempdir().unwrap();
+    // Add a one-shot in the past
+    boo().env("HOME", dir.path())
+        .args(["add", "--name", "old-oneshot", "--at", "2020-01-01T00:00:00Z", "--prompt", "hello"])
+        .assert().success();
+    boo().env("HOME", dir.path())
+        .args(["clean", "--dry-run"])
+        .assert().success()
+        .stdout(predicate::str::contains("Would remove"))
+        .stdout(predicate::str::contains("old-oneshot"));
+    // Job should still exist
+    boo().env("HOME", dir.path())
+        .arg("list")
+        .assert().success()
+        .stdout(predicate::str::contains("old-oneshot"));
+}
+
+#[test]
+fn test_clean_removes_done_oneshots() {
+    let dir = tempfile::tempdir().unwrap();
+    boo().env("HOME", dir.path())
+        .args(["add", "--name", "done-oneshot", "--at", "2020-01-01T00:00:00Z", "--prompt", "hello"])
+        .assert().success();
+    boo().env("HOME", dir.path())
+        .args(["add", "--name", "keep-recurring", "--every", "1h", "--prompt", "hello"])
+        .assert().success();
+    boo().env("HOME", dir.path())
+        .arg("clean")
+        .assert().success()
+        .stdout(predicate::str::contains("Cleaned 1 job(s)"));
+    // Recurring should still exist, one-shot should be gone
+    let output = boo().env("HOME", dir.path()).arg("list").output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("keep-recurring"));
+    assert!(!stdout.contains("done-oneshot"));
+}
+
+#[test]
+fn test_clean_keep_logs() {
+    let dir = tempfile::tempdir().unwrap();
+    boo().env("HOME", dir.path())
+        .args(["add", "--name", "logs-oneshot", "--at", "2020-01-01T00:00:00Z", "--prompt", "hello"])
+        .assert().success();
+    boo().env("HOME", dir.path())
+        .args(["clean", "--keep-logs"])
+        .assert().success()
+        .stdout(predicate::str::contains("logs kept"));
+}
+
+#[test]
+fn test_list_json_has_running_field() {
+    let dir = tempfile::tempdir().unwrap();
+    boo().env("HOME", dir.path())
+        .args(["add", "--name", "run-field-test", "--every", "1h", "--prompt", "hello"])
+        .assert().success();
+    boo().env("HOME", dir.path())
+        .args(["list", "--format", "json"])
+        .assert().success()
+        .stdout(predicate::str::contains("\"running\""));
+}

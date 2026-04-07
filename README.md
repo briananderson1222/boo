@@ -89,6 +89,9 @@ boo add --name "calendar-check" \
 | `boo stats [name\|id]` | Show run statistics (24h/7d/30d windows, supports `--format json\|csv\|table`) |
 | `boo edit <name\|id>` | Edit an existing job's settings |
 | `boo wait <name\|id>` | Wait for an active job run to complete |
+| `boo running` | Show only currently active runs with PID, elapsed time, source |
+| `boo kill <name\|id>` | Terminate an active run (kills process group) |
+| `boo clean` | Remove completed one-shot jobs (`--dry-run` to preview, `--keep-logs` to retain logs) |
 | `boo install` | Register as auto-start service (re-run after building new version) |
 | `boo uninstall` | Remove auto-start service |
 

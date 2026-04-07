@@ -11,6 +11,10 @@ All notable changes to this project will be documented in this file.
 - `boo status` now shows active runs with PID, source (manual/daemon), and elapsed time; running jobs marked with ▶
 - `boo wait <job>`: poll until an active run completes, print result, exit 1 on failure
 - `boo status --format json` includes `active_runs`, `running`, `pid`, `running_since` fields
+- `boo list` now shows running status: ▶ prefix with elapsed time in table, `running`/`pid`/`running_since` in JSON
+- `boo running`: show only currently active runs with PID, elapsed time, and source (manual/daemon)
+- `boo kill <job>`: terminate an active run by name or ID, kills process group and cleans up tracking
+- `boo clean`: remove completed one-shot jobs (expired `--at` jobs). Supports `--dry-run` and `--keep-logs`
 
 ### Bug Fixes
 - Ensure working directory and log directory exist before job execution
