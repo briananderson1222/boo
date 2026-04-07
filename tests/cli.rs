@@ -4,6 +4,13 @@ use predicates::prelude::*;
 fn boo() -> Command { assert_cmd::cargo_bin_cmd!("boo") }
 fn tmp() -> String { std::env::temp_dir().to_string_lossy().into_owned() }
 
+/// Create a boo command with an isolated home directory.
+fn boo_isolated(dir: &std::path::Path) -> Command {
+    let mut cmd = boo();
+    cmd.env("HOME", dir).env("USERPROFILE", dir);
+    cmd
+}
+
 #[test]
 fn test_help() {
     boo().arg("--help").assert().success()
@@ -240,11 +247,10 @@ fn test_kill_nonexistent() {
 #[test]
 fn test_clean_nothing_to_clean() {
     let dir = tempfile::tempdir().unwrap();
-    // Add a recurring job (not a one-shot) — should not be cleaned
-    boo().env("HOME", dir.path())
+    boo_isolated(dir.path())
         .args(["add", "--name", "recurring", "--every", "1h", "--prompt", "hello"])
         .assert().success();
-    boo().env("HOME", dir.path())
+    boo_isolated(dir.path())
         .arg("clean")
         .assert().success()
         .stdout(predicate::str::contains("No completed one-shot"));
@@ -253,17 +259,16 @@ fn test_clean_nothing_to_clean() {
 #[test]
 fn test_clean_dry_run() {
     let dir = tempfile::tempdir().unwrap();
-    // Add a one-shot in the past
-    boo().env("HOME", dir.path())
+    boo_isolated(dir.path())
         .args(["add", "--name", "old-oneshot", "--at", "2020-01-01T00:00:00Z", "--prompt", "hello"])
         .assert().success();
-    boo().env("HOME", dir.path())
+    boo_isolated(dir.path())
         .args(["clean", "--dry-run"])
         .assert().success()
         .stdout(predicate::str::contains("Would remove"))
         .stdout(predicate::str::contains("old-oneshot"));
     // Job should still exist
-    boo().env("HOME", dir.path())
+    boo_isolated(dir.path())
         .arg("list")
         .assert().success()
         .stdout(predicate::str::contains("old-oneshot"));
@@ -272,18 +277,18 @@ fn test_clean_dry_run() {
 #[test]
 fn test_clean_removes_done_oneshots() {
     let dir = tempfile::tempdir().unwrap();
-    boo().env("HOME", dir.path())
+    boo_isolated(dir.path())
         .args(["add", "--name", "done-oneshot", "--at", "2020-01-01T00:00:00Z", "--prompt", "hello"])
         .assert().success();
-    boo().env("HOME", dir.path())
+    boo_isolated(dir.path())
         .args(["add", "--name", "keep-recurring", "--every", "1h", "--prompt", "hello"])
         .assert().success();
-    boo().env("HOME", dir.path())
+    boo_isolated(dir.path())
         .arg("clean")
         .assert().success()
         .stdout(predicate::str::contains("Cleaned 1 job(s)"));
     // Recurring should still exist, one-shot should be gone
-    let output = boo().env("HOME", dir.path()).arg("list").output().unwrap();
+    let output = boo_isolated(dir.path()).arg("list").output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("keep-recurring"));
     assert!(!stdout.contains("done-oneshot"));
@@ -292,10 +297,10 @@ fn test_clean_removes_done_oneshots() {
 #[test]
 fn test_clean_keep_logs() {
     let dir = tempfile::tempdir().unwrap();
-    boo().env("HOME", dir.path())
+    boo_isolated(dir.path())
         .args(["add", "--name", "logs-oneshot", "--at", "2020-01-01T00:00:00Z", "--prompt", "hello"])
         .assert().success();
-    boo().env("HOME", dir.path())
+    boo_isolated(dir.path())
         .args(["clean", "--keep-logs"])
         .assert().success()
         .stdout(predicate::str::contains("logs kept"));
