@@ -118,6 +118,9 @@ enum Commands {
         /// Launch an interactive session in the foreground instead of running non-interactively
         #[arg(long)]
         interactive: bool,
+        /// Open a new terminal window for the session (use with --interactive)
+        #[arg(long)]
+        new_window: bool,
         /// Pass --trust-all-tools to kiro-cli
         #[arg(long)]
         trust_all_tools: bool,
@@ -297,7 +300,7 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
             let target = parts.get(1).ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
             tokio::runtime::Builder::new_current_thread()
                 .enable_all().build().unwrap()
-                .block_on(cmd_run(target, false, false, false, false, None))
+                .block_on(cmd_run(target, false, false, false, false, false, None))
         }
         Some("open") => {
             let target = parts.get(1).ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
@@ -354,8 +357,8 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
         Commands::Enable { target } => cmd_set_enabled(&target, true),
         Commands::Disable { target } => cmd_set_enabled(&target, false),
         Commands::Status { format } => cmd_status(&format),
-        Commands::Run { target, no_notify, follow, interactive, trust_all_tools, trust_tools } =>
-            cmd_run(&target, no_notify, follow, interactive, trust_all_tools, trust_tools).await,
+        Commands::Run { target, no_notify, follow, interactive, new_window, trust_all_tools, trust_tools } =>
+            cmd_run(&target, no_notify, follow, interactive, new_window, trust_all_tools, trust_tools).await,
         Commands::Next { cron_expr, count } => cmd_next(&cron_expr, count),
         Commands::Logs { target, count, output, format } => cmd_logs(&target, count, output, &format),
         Commands::Resume { target, prompt, previous } => cmd_resume(target.as_deref(), prompt.as_deref(), previous),
@@ -410,11 +413,18 @@ fn cmd_daemon_blocking() -> boo::error::Result<()> {
     Ok(())
 }
 
-async fn cmd_run(target: &str, no_notify: bool, follow: bool, interactive: bool, trust_all_tools: bool, trust_tools: Option<String>) -> boo::error::Result<()> {
+async fn cmd_run(target: &str, no_notify: bool, follow: bool, interactive: bool, new_window: bool, trust_all_tools: bool, trust_tools: Option<String>) -> boo::error::Result<()> {
     let store = JobStore::new()?;
     let mut job = resolve_job(&store, target)?;
     if trust_all_tools { job.trust_all_tools = true; }
     if let Some(ref tools) = trust_tools { job.trust_tools = Some(tools.clone()); }
+
+    if interactive && new_window {
+        // Open in a new terminal window and return the job ID for tracking
+        notifier::open_terminal_run(&job.name, job.agent.as_deref(), &job.prompt, &job.working_dir);
+        println!("{}", job.id);
+        return Ok(());
+    }
 
     if interactive {
         return launch_interactive_session(&job.working_dir, job.agent.as_deref(), Some(&job.prompt), None);

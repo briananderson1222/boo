@@ -242,6 +242,27 @@ pub fn open_terminal_resume(job_name: &str, prompt: Option<&str>, previous: bool
         args.push_str(&format!(" '{}'", p.replace('\'', "'\\''"))); 
     }
 
+    open_terminal_with_command(&args, &format!("resume-{}", std::process::id()));
+}
+
+/// Open a new terminal window and run a fresh interactive kiro-cli session.
+/// Used by `boo run --interactive --new-window` for orchestrator handoffs.
+pub fn open_terminal_run(job_name: &str, agent: Option<&str>, prompt: &str, working_dir: &std::path::Path) {
+    let config = crate::config::Config::load();
+    let kiro = &config.kiro_cli_path;
+
+    let mut args = format!("cd '{}' && '{}' chat", 
+        working_dir.to_string_lossy().replace('\'', "'\\''"),
+        kiro.replace('\'', "'\\''"));
+    if let Some(a) = agent {
+        args.push_str(&format!(" --agent '{}'", a.replace('\'', "'\\''"))); 
+    }
+    args.push_str(&format!(" -- '{}'", prompt.replace('\'', "'\\''")));
+
+    open_terminal_with_command(&args, job_name);
+}
+
+fn open_terminal_with_command(args: &str, label: &str) {
     #[cfg(target_os = "macos")]
     {
         let config = crate::config::Config::load();
@@ -253,33 +274,41 @@ pub fn open_terminal_resume(job_name: &str, prompt: Option<&str>, previous: bool
             }
             "Terminal"
         });
-        let tmp = crate::config::boo_dir().join(format!("reply-{}.command", std::process::id()));
-        let _ = std::fs::write(&tmp, format!("#!/bin/sh\nexec {args}\n"));
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
-        if terminal == "Terminal" {
-            let script = format!("tell application \"Terminal\"\n\tactivate\n\tdo script \"'{}'\"\nend tell",
-                tmp.to_string_lossy().replace('\'', "'\\''"));
+        // iTerm and Terminal.app use AppleScript to avoid .command file session restoration loops
+        if terminal == "iTerm" {
+            let escaped = args.replace('\\', "\\\\").replace('"', "\\\"");
+            let script = format!(
+                "tell application \"iTerm\"\n\tactivate\n\tcreate window with default profile command \"{escaped}\"\nend tell"
+            );
+            let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
+        } else if terminal == "Terminal" {
+            let escaped = args.replace('\\', "\\\\").replace('"', "\\\"");
+            let script = format!(
+                "tell application \"Terminal\"\n\tactivate\n\tdo script \"{escaped}\"\nend tell"
+            );
             let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
         } else {
+            let tmp = crate::config::boo_dir().join(format!("handoff-{}.command", label));
+            let _ = std::fs::write(&tmp, format!("#!/bin/sh\nrm -f \"$0\"\nexec {args}\n"));
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
             let _ = std::process::Command::new("open").args(["-a", terminal]).arg(&tmp).status();
         }
     }
 
     #[cfg(target_os = "linux")]
     {
-        let cmd = format!("exec {args}");
         let terminals = [("x-terminal-emulator", vec!["-e"]), ("gnome-terminal", vec!["--"]), ("xterm", vec!["-e"])];
         for (term, term_args) in &terminals {
             let mut c = std::process::Command::new(term);
-            c.args(term_args).args(["sh", "-c", &cmd]);
+            c.args(term_args).args(["sh", "-c", args]);
             if c.spawn().is_ok() { return; }
         }
     }
 
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd").args(["/C", "start", "cmd", "/K", &args]).spawn();
+        let _ = std::process::Command::new("cmd").args(["/C", "start", "cmd", "/K", args]).spawn();
     }
 }
 
