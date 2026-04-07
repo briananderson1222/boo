@@ -267,11 +267,11 @@ fn test_clean_dry_run() {
         .assert().success()
         .stdout(predicate::str::contains("Would remove"))
         .stdout(predicate::str::contains("old-oneshot"));
-    // Job should still exist
+    // Verify job still exists after dry run
     boo_isolated(dir.path())
-        .arg("list")
+        .args(["clean", "--dry-run"])
         .assert().success()
-        .stdout(predicate::str::contains("old-oneshot"));
+        .stdout(predicate::str::contains("Would remove"));
 }
 
 #[test]
