@@ -262,6 +262,7 @@ pub fn open_terminal_run(job_name: &str, agent: Option<&str>, prompt: &str, work
     open_terminal_with_command(&args, job_name);
 }
 
+#[allow(unused_variables)]
 fn open_terminal_with_command(args: &str, label: &str) {
     #[cfg(target_os = "macos")]
     {
