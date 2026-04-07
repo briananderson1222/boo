@@ -118,10 +118,15 @@ impl Job {
         if let Some(at) = self.at_time {
             format!("at {}", at.format("%Y-%m-%d %H:%M"))
         } else if let Some(secs) = self.every_secs {
-            if secs >= 86400 { format!("every {}d", secs / 86400) }
-            else if secs >= 3600 { format!("every {}h", secs / 3600) }
-            else if secs >= 60 { format!("every {}m", secs / 60) }
-            else { format!("every {}s", secs) }
+            if secs >= 86400 {
+                format!("every {}d", secs / 86400)
+            } else if secs >= 3600 {
+                format!("every {}h", secs / 3600)
+            } else if secs >= 60 {
+                format!("every {}m", secs / 60)
+            } else {
+                format!("every {}s", secs)
+            }
         } else {
             format!("cron {}", self.cron_expr)
         }
@@ -137,7 +142,8 @@ pub fn resolve_artifact(working_dir: &Path, pattern: &str) -> Option<PathBuf> {
         return if full.exists() { Some(full) } else { None };
     }
     // Glob: find newest matching file
-    glob::glob(&full.to_string_lossy()).ok()?
+    glob::glob(&full.to_string_lossy())
+        .ok()?
         .filter_map(|e| e.ok())
         .filter(|p| p.is_file())
         .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())

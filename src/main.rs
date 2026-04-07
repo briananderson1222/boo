@@ -1,4 +1,3 @@
-use clap::{Parser, Subcommand};
 use boo::clock::SystemClock;
 use boo::config::Config;
 use boo::cron_eval;
@@ -9,13 +8,18 @@ use boo::notifier;
 use boo::scheduler::Scheduler;
 use boo::store::JobStore;
 use chrono::{DateTime, Utc};
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Parser)]
-#[command(name = "boo", version, about = "Cross-platform scheduler daemon for kiro-cli prompts")]
+#[command(
+    name = "boo",
+    version,
+    about = "Cross-platform scheduler daemon for kiro-cli prompts"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -212,9 +216,7 @@ enum Commands {
         format: String,
     },
     /// Kill an active job run
-    Kill {
-        target: String,
-    },
+    Kill { target: String },
     /// Remove completed one-shot jobs
     Clean {
         /// Keep log files for removed jobs
@@ -266,8 +268,21 @@ fn main() {
     let cli = Cli::parse();
 
     // Handle notification subprocess on main thread (required for macOS notification delegate)
-    if let Commands::_Notify { summary, body, open, working_dir, job_name } = cli.command {
-        boo::notifier::send_and_exit(&summary, &body, open.as_deref(), working_dir.as_deref(), job_name.as_deref());
+    if let Commands::_Notify {
+        summary,
+        body,
+        open,
+        working_dir,
+        job_name,
+    } = cli.command
+    {
+        boo::notifier::send_and_exit(
+            &summary,
+            &body,
+            open.as_deref(),
+            working_dir.as_deref(),
+            job_name.as_deref(),
+        );
         return;
     }
 
@@ -301,7 +316,8 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
     let (path, query) = url.split_once('?').unwrap_or((url, ""));
     let parts: Vec<&str> = path.trim_end_matches('/').split('/').collect();
 
-    let params: std::collections::HashMap<&str, String> = query.split('&')
+    let params: std::collections::HashMap<&str, String> = query
+        .split('&')
         .filter(|s| !s.is_empty())
         .filter_map(|kv| kv.split_once('='))
         .map(|(k, v)| (k, urldecode(v)))
@@ -323,28 +339,44 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
             }
         }
         Some("run") => {
-            let target = parts.get(1).ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
+            let target = parts
+                .get(1)
+                .ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
             tokio::runtime::Builder::new_current_thread()
-                .enable_all().build().unwrap()
+                .enable_all()
+                .build()
+                .unwrap()
                 .block_on(cmd_run(target, false, false, false, false, false, None))
         }
         Some("open") => {
-            let target = parts.get(1).ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
+            let target = parts
+                .get(1)
+                .ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
             let store = JobStore::new()?;
             let job = resolve_job(&store, target)?;
             if let Some(ref artifact) = job.open_artifact {
                 if let Some(path) = boo::job::resolve_artifact(&job.working_dir, artifact) {
                     #[cfg(target_os = "macos")]
-                    { let _ = std::process::Command::new("open").arg(&path).spawn(); }
+                    {
+                        let _ = std::process::Command::new("open").arg(&path).spawn();
+                    }
                     #[cfg(target_os = "linux")]
-                    { let _ = std::process::Command::new("xdg-open").arg(&path).spawn(); }
+                    {
+                        let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+                    }
                     #[cfg(target_os = "windows")]
-                    { let _ = std::process::Command::new("cmd").args(["/C", "start", "", &path.to_string_lossy()]).spawn(); }
+                    {
+                        let _ = std::process::Command::new("cmd")
+                            .args(["/C", "start", "", &path.to_string_lossy()])
+                            .spawn();
+                    }
                 }
             }
             Ok(())
         }
-        _ => Err(boo::error::BooError::Other(format!("Unknown URL action: {url}")))
+        _ => Err(boo::error::BooError::Other(format!(
+            "Unknown URL action: {url}"
+        ))),
     }
 }
 
@@ -370,24 +402,139 @@ fn urldecode(s: &str) -> String {
 async fn run(cli: Cli) -> boo::error::Result<()> {
     match cli.command {
         Commands::Daemon => unreachable!("handled before tokio runtime"),
-        Commands::Add { name, cron, at, every, prompt, command, dir, agent, model, timeout,
-                        timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, trust_all_tools, trust_tools, runner, description } =>
-            cmd_add(name, cron, at, every, prompt, command, dir, agent, model, timeout,
-                    timezone, delete_after_run, open_artifact, retry, retry_delay, notify_start, trust_all_tools, trust_tools, runner, description).await,
-        Commands::Remove { target, delete_logs, keep_logs } => cmd_remove(&target, delete_logs, keep_logs),
-        Commands::Edit { target, name, cron, at, every, prompt, command, dir, agent, model,
-                         timeout, timezone, open_artifact, retry, retry_delay, notify_start, trust_all_tools, trust_tools, runner, description } =>
-            cmd_edit(&target, name, cron, at, every, prompt, command, dir, agent, model,
-                     timeout, timezone, open_artifact, retry, retry_delay, notify_start, trust_all_tools, trust_tools, runner, description).await,
+        Commands::Add {
+            name,
+            cron,
+            at,
+            every,
+            prompt,
+            command,
+            dir,
+            agent,
+            model,
+            timeout,
+            timezone,
+            delete_after_run,
+            open_artifact,
+            retry,
+            retry_delay,
+            notify_start,
+            trust_all_tools,
+            trust_tools,
+            runner,
+            description,
+        } => {
+            cmd_add(
+                name,
+                cron,
+                at,
+                every,
+                prompt,
+                command,
+                dir,
+                agent,
+                model,
+                timeout,
+                timezone,
+                delete_after_run,
+                open_artifact,
+                retry,
+                retry_delay,
+                notify_start,
+                trust_all_tools,
+                trust_tools,
+                runner,
+                description,
+            )
+            .await
+        }
+        Commands::Remove {
+            target,
+            delete_logs,
+            keep_logs,
+        } => cmd_remove(&target, delete_logs, keep_logs),
+        Commands::Edit {
+            target,
+            name,
+            cron,
+            at,
+            every,
+            prompt,
+            command,
+            dir,
+            agent,
+            model,
+            timeout,
+            timezone,
+            open_artifact,
+            retry,
+            retry_delay,
+            notify_start,
+            trust_all_tools,
+            trust_tools,
+            runner,
+            description,
+        } => {
+            cmd_edit(
+                &target,
+                name,
+                cron,
+                at,
+                every,
+                prompt,
+                command,
+                dir,
+                agent,
+                model,
+                timeout,
+                timezone,
+                open_artifact,
+                retry,
+                retry_delay,
+                notify_start,
+                trust_all_tools,
+                trust_tools,
+                runner,
+                description,
+            )
+            .await
+        }
         Commands::List { format } => cmd_list(&format),
         Commands::Enable { target } => cmd_set_enabled(&target, true),
         Commands::Disable { target } => cmd_set_enabled(&target, false),
         Commands::Status { format } => cmd_status(&format),
-        Commands::Run { target, no_notify, follow, interactive, new_window, trust_all_tools, trust_tools } =>
-            cmd_run(&target, no_notify, follow, interactive, new_window, trust_all_tools, trust_tools).await,
+        Commands::Run {
+            target,
+            no_notify,
+            follow,
+            interactive,
+            new_window,
+            trust_all_tools,
+            trust_tools,
+        } => {
+            cmd_run(
+                &target,
+                no_notify,
+                follow,
+                interactive,
+                new_window,
+                trust_all_tools,
+                trust_tools,
+            )
+            .await
+        }
         Commands::Next { cron_expr, count } => cmd_next(&cron_expr, count),
-        Commands::Logs { target, count, output, format } => cmd_logs(&target, count, output, &format),
-        Commands::Resume { target, prompt, previous } => cmd_resume(target.as_deref(), prompt.as_deref(), previous),
+        Commands::Logs {
+            target,
+            count,
+            output,
+            format,
+        } => cmd_logs(&target, count, output, &format),
+        Commands::Resume {
+            target,
+            prompt,
+            previous,
+        } => cmd_resume(target.as_deref(), prompt.as_deref(), previous),
         Commands::Stats { target, format } => cmd_stats(target.as_deref(), &format),
         Commands::Running { format } => cmd_running(&format),
         Commands::Kill { target } => cmd_kill(&target),
@@ -415,23 +562,33 @@ fn cmd_daemon_blocking() -> boo::error::Result<()> {
     let lock_file = File::create(&lock_path)?;
     lock_file.try_lock_exclusive().map_err(|_| {
         let existing_pid = std::fs::read_to_string(&pid_path)
-            .ok().and_then(|s| s.trim().parse::<u32>().ok()).unwrap_or(0);
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            .unwrap_or(0);
         boo::error::BooError::DaemonAlreadyRunning(existing_pid)
     })?;
     std::fs::write(&pid_path, process::id().to_string())?;
 
     let config = Config::load();
     let notification_sender = boo::notification_service::NotificationSender::start_on_main_thread();
-    let scheduler = Arc::new(Scheduler::new(SystemClock, config, None).with_notification_sender(notification_sender.clone()));
+    let scheduler = Arc::new(
+        Scheduler::new(SystemClock, config, None)
+            .with_notification_sender(notification_sender.clone()),
+    );
 
     // Run tokio + scheduler on a background thread
     let s = scheduler.clone();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all().build().unwrap();
+            .enable_all()
+            .build()
+            .unwrap();
         rt.block_on(async {
             let s2 = s.clone();
-            tokio::spawn(async move { let _ = tokio::signal::ctrl_c().await; s2.trigger_shutdown(); });
+            tokio::spawn(async move {
+                let _ = tokio::signal::ctrl_c().await;
+                s2.trigger_shutdown();
+            });
             s.run().await;
         });
         let _ = std::fs::remove_file(&pid_path);
@@ -443,21 +600,43 @@ fn cmd_daemon_blocking() -> boo::error::Result<()> {
     Ok(())
 }
 
-async fn cmd_run(target: &str, no_notify: bool, follow: bool, interactive: bool, new_window: bool, trust_all_tools: bool, trust_tools: Option<String>) -> boo::error::Result<()> {
+async fn cmd_run(
+    target: &str,
+    no_notify: bool,
+    follow: bool,
+    interactive: bool,
+    new_window: bool,
+    trust_all_tools: bool,
+    trust_tools: Option<String>,
+) -> boo::error::Result<()> {
     let store = JobStore::new()?;
     let mut job = resolve_job(&store, target)?;
-    if trust_all_tools { job.trust_all_tools = true; }
-    if let Some(ref tools) = trust_tools { job.trust_tools = Some(tools.clone()); }
+    if trust_all_tools {
+        job.trust_all_tools = true;
+    }
+    if let Some(ref tools) = trust_tools {
+        job.trust_tools = Some(tools.clone());
+    }
 
     if interactive && new_window {
         // Open in a new terminal window and return the job ID for tracking
-        notifier::open_terminal_run(&job.name, job.agent.as_deref(), &job.prompt, &job.working_dir);
+        notifier::open_terminal_run(
+            &job.name,
+            job.agent.as_deref(),
+            &job.prompt,
+            &job.working_dir,
+        );
         println!("{}", job.id);
         return Ok(());
     }
 
     if interactive {
-        return launch_interactive_session(&job.working_dir, job.agent.as_deref(), Some(&job.prompt), None);
+        return launch_interactive_session(
+            &job.working_dir,
+            job.agent.as_deref(),
+            Some(&job.prompt),
+            None,
+        );
     }
 
     let config = Config::load();
@@ -466,21 +645,33 @@ async fn cmd_run(target: &str, no_notify: bool, follow: bool, interactive: bool,
         notifier::notify_start(&[&job.name]);
     }
     if let Some(ref url) = config.notify_webhook {
-        notifier::notify_webhook(url, serde_json::json!({
-            "event": "job.started", "job": job.name, "id": job.id.to_string()[..8],
-        }));
+        notifier::notify_webhook(
+            url,
+            serde_json::json!({
+                "event": "job.started", "job": job.name, "id": job.id.to_string()[..8],
+            }),
+        );
     }
 
-    if !follow { println!("Running job '{}'...", job.name); }
+    if !follow {
+        println!("Running job '{}'...", job.name);
+    }
     let log_dir = boo::config::boo_dir().join("runs").join(job.id.to_string());
     std::fs::create_dir_all(&log_dir)?;
     let now = Utc::now();
-    let log_path = log_dir.join(format!("manual_{}_{:03}.log", now.format("%Y%m%d_%H%M%S"), now.timestamp_subsec_millis()));
+    let log_path = log_dir.join(format!(
+        "manual_{}_{:03}.log",
+        now.format("%Y%m%d_%H%M%S"),
+        now.timestamp_subsec_millis()
+    ));
 
     // Track active run
     let active = boo::store::ActiveRun {
-        job_id: job.id, job_name: job.name.clone(),
-        pid: process::id(), started_at: now, manual: true,
+        job_id: job.id,
+        job_name: job.name.clone(),
+        pid: process::id(),
+        started_at: now,
+        manual: true,
     };
     let _ = store.write_active_run(&active);
 
@@ -488,30 +679,49 @@ async fn cmd_run(target: &str, no_notify: bool, follow: bool, interactive: bool,
         Ok(result) => {
             store.remove_active_run(job.id);
             let record = boo::job::RunRecord {
-                job_id: job.id, job_name: job.name.clone(), fired_at: now, scheduled_for: now,
-                missed_count: 0, duration_secs: result.duration_secs, exit_code: result.exit_code,
-                success: result.success, output_path: result.output_path.clone(), manual: true,
+                job_id: job.id,
+                job_name: job.name.clone(),
+                fired_at: now,
+                scheduled_for: now,
+                missed_count: 0,
+                duration_secs: result.duration_secs,
+                exit_code: result.exit_code,
+                success: result.success,
+                output_path: result.output_path.clone(),
+                manual: true,
             };
             store.append_run_record(&record)?;
-            if !no_notify { notifier::notify(&job, &result); }
+            if !no_notify {
+                notifier::notify(&job, &result);
+            }
             if let Some(ref url) = config.notify_webhook {
-                let artifact = job.open_artifact.as_ref()
+                let artifact = job
+                    .open_artifact
+                    .as_ref()
                     .and_then(|a| boo::job::resolve_artifact(&job.working_dir, a))
                     .map(|p| p.to_string_lossy().to_string());
-                notifier::notify_webhook(url, serde_json::json!({
-                    "event": if result.success { "job.completed" } else { "job.failed" },
-                    "job": job.name, "id": job.id.to_string()[..8],
-                    "success": result.success, "duration_secs": result.duration_secs,
-                    "artifact": artifact,
-                }));
+                notifier::notify_webhook(
+                    url,
+                    serde_json::json!({
+                        "event": if result.success { "job.completed" } else { "job.failed" },
+                        "job": job.name, "id": job.id.to_string()[..8],
+                        "success": result.success, "duration_secs": result.duration_secs,
+                        "artifact": artifact,
+                    }),
+                );
             }
             if follow {
                 if let Some(ref response) = result.response {
                     print!("{response}");
                 }
-                if !result.success { process::exit(1); }
+                if !result.success {
+                    process::exit(1);
+                }
             } else {
-                println!("Job completed: success={}, duration={:.2}s", result.success, result.duration_secs);
+                println!(
+                    "Job completed: success={}, duration={:.2}s",
+                    result.success, result.duration_secs
+                );
                 if let Some(ref response) = result.response {
                     println!("\n{response}");
                 }
@@ -520,14 +730,22 @@ async fn cmd_run(target: &str, no_notify: bool, follow: bool, interactive: bool,
         }
         Err(e) => {
             store.remove_active_run(job.id);
-            if !no_notify { notifier::notify_error(&job, &e.to_string()); }
-            if let Some(ref url) = config.notify_webhook {
-                notifier::notify_webhook(url, serde_json::json!({
-                    "event": "job.failed", "job": job.name, "id": job.id.to_string()[..8],
-                    "error": e.to_string(),
-                }));
+            if !no_notify {
+                notifier::notify_error(&job, &e.to_string());
             }
-            if follow { eprintln!("{e}"); process::exit(1); }
+            if let Some(ref url) = config.notify_webhook {
+                notifier::notify_webhook(
+                    url,
+                    serde_json::json!({
+                        "event": "job.failed", "job": job.name, "id": job.id.to_string()[..8],
+                        "error": e.to_string(),
+                    }),
+                );
+            }
+            if follow {
+                eprintln!("{e}");
+                process::exit(1);
+            }
             Err(e)
         }
     }
@@ -535,22 +753,39 @@ async fn cmd_run(target: &str, no_notify: bool, follow: bool, interactive: bool,
 
 #[allow(clippy::too_many_arguments)]
 async fn cmd_add(
-    name: String, cron: Option<String>, at: Option<String>, every: Option<String>,
-    prompt: Option<String>, command: Option<String>, dir: Option<PathBuf>, agent: Option<String>, model: Option<String>,
-    timeout: Option<u64>, timezone: Option<String>, delete_after_run: bool,
-    open_artifact: Option<String>, retry: u32, retry_delay: u64, notify_start: bool,
-    trust_all_tools: bool, trust_tools: Option<String>, runner: Option<String>,
+    name: String,
+    cron: Option<String>,
+    at: Option<String>,
+    every: Option<String>,
+    prompt: Option<String>,
+    command: Option<String>,
+    dir: Option<PathBuf>,
+    agent: Option<String>,
+    model: Option<String>,
+    timeout: Option<u64>,
+    timezone: Option<String>,
+    delete_after_run: bool,
+    open_artifact: Option<String>,
+    retry: u32,
+    retry_delay: u64,
+    notify_start: bool,
+    trust_all_tools: bool,
+    trust_tools: Option<String>,
+    runner: Option<String>,
     description: Option<String>,
 ) -> boo::error::Result<()> {
     if prompt.is_none() && command.is_none() {
-        return Err(boo::error::BooError::Other("Must specify --prompt or --command".into()));
+        return Err(boo::error::BooError::Other(
+            "Must specify --prompt or --command".into(),
+        ));
     }
 
     // Require exactly one schedule type
     let schedule_count = cron.is_some() as u8 + at.is_some() as u8 + every.is_some() as u8;
     if schedule_count == 0 {
         return Err(boo::error::BooError::Other(
-            "Must specify one of --cron, --at, or --every".into()));
+            "Must specify one of --cron, --at, or --every".into(),
+        ));
     }
 
     let dir = dir.unwrap_or_else(|| {
@@ -560,13 +795,17 @@ async fn cmd_add(
     });
     if !dir.exists() {
         return Err(boo::error::BooError::Other(format!(
-            "Working directory does not exist: {}", dir.display())));
+            "Working directory does not exist: {}",
+            dir.display()
+        )));
     }
 
     let store = JobStore::new()?;
     if store.load_jobs()?.iter().any(|j| j.name == name) {
         return Err(boo::error::BooError::Other(format!(
-            "Job with name '{}' already exists", name)));
+            "Job with name '{}' already exists",
+            name
+        )));
     }
 
     let prompt_str = prompt.as_deref().unwrap_or("");
@@ -582,7 +821,11 @@ async fn cmd_add(
     job.notify_start = notify_start;
     job.trust_all_tools = trust_all_tools;
     job.trust_tools = trust_tools;
-    job.runner = if command.is_some() && runner.is_none() { Some("shell".into()) } else { runner };
+    job.runner = if command.is_some() && runner.is_none() {
+        Some("shell".into())
+    } else {
+        runner
+    };
     job.command = command;
     job.description = description;
 
@@ -597,7 +840,12 @@ async fn cmd_add(
     }
 
     store.add_job(job.clone())?;
-    println!("Added job '{}' ({}) with ID {}", job.name, job.schedule_display(), job.id);
+    println!(
+        "Added job '{}' ({}) with ID {}",
+        job.name,
+        job.schedule_display(),
+        job.id
+    );
     Ok(())
 }
 
@@ -608,15 +856,26 @@ fn cmd_remove(target: &str, delete_logs: bool, keep_logs: bool) -> boo::error::R
     let job = resolve_job(&store, target)?;
     let records = store.load_run_records(job.id, 1)?;
     if !records.is_empty() && !keep_logs {
-        let should_delete = if delete_logs { true } else {
-            eprint!("Job '{}' has run history. Delete logs too? [y/N] ", job.name);
+        let should_delete = if delete_logs {
+            true
+        } else {
+            eprint!(
+                "Job '{}' has run history. Delete logs too? [y/N] ",
+                job.name
+            );
             let mut input = String::new();
             std::io::stdin().read_line(&mut input).ok();
             input.trim().eq_ignore_ascii_case("y")
         };
         if should_delete {
-            let _ = std::fs::remove_dir_all(boo::config::boo_dir().join("runs").join(job.id.to_string()));
-            let _ = std::fs::remove_file(boo::config::boo_dir().join("runs").join(format!("{}.jsonl", job.id)));
+            let _ = std::fs::remove_dir_all(
+                boo::config::boo_dir().join("runs").join(job.id.to_string()),
+            );
+            let _ = std::fs::remove_file(
+                boo::config::boo_dir()
+                    .join("runs")
+                    .join(format!("{}.jsonl", job.id)),
+            );
             eprintln!("Deleted run history.");
         }
     }
@@ -627,12 +886,25 @@ fn cmd_remove(target: &str, delete_logs: bool, keep_logs: bool) -> boo::error::R
 
 #[allow(clippy::too_many_arguments)]
 async fn cmd_edit(
-    target: &str, name: Option<String>, cron: Option<String>, at: Option<String>,
-    every: Option<String>, prompt: Option<String>, command: Option<String>,
-    dir: Option<PathBuf>, agent: Option<String>, model: Option<String>,
-    timeout: Option<u64>, timezone: Option<String>, open_artifact: Option<String>,
-    retry: Option<u32>, retry_delay: Option<u64>, notify_start: Option<bool>,
-    trust_all_tools: Option<bool>, trust_tools: Option<String>, runner: Option<String>,
+    target: &str,
+    name: Option<String>,
+    cron: Option<String>,
+    at: Option<String>,
+    every: Option<String>,
+    prompt: Option<String>,
+    command: Option<String>,
+    dir: Option<PathBuf>,
+    agent: Option<String>,
+    model: Option<String>,
+    timeout: Option<u64>,
+    timezone: Option<String>,
+    open_artifact: Option<String>,
+    retry: Option<u32>,
+    retry_delay: Option<u64>,
+    notify_start: Option<bool>,
+    trust_all_tools: Option<bool>,
+    trust_tools: Option<String>,
+    runner: Option<String>,
     description: Option<String>,
 ) -> boo::error::Result<()> {
     let store = JobStore::new()?;
@@ -640,9 +912,15 @@ async fn cmd_edit(
     let mut changes = Vec::new();
 
     if let Some(ref new_name) = name {
-        if store.load_jobs()?.iter().any(|j| j.name == *new_name && j.id != job.id) {
+        if store
+            .load_jobs()?
+            .iter()
+            .any(|j| j.name == *new_name && j.id != job.id)
+        {
             return Err(boo::error::BooError::Other(format!(
-                "Job with name '{}' already exists", new_name)));
+                "Job with name '{}' already exists",
+                new_name
+            )));
         }
         let old_ws = boo::config::boo_dir().join("workspace").join(&job.name);
         let new_ws = boo::config::boo_dir().join("workspace").join(new_name);
@@ -672,24 +950,71 @@ async fn cmd_edit(
         job.at_time = None;
         changes.push(format!("every → {v}"));
     }
-    if let Some(v) = prompt { job.prompt = v.clone(); changes.push(format!("prompt → {v}")); }
-    if let Some(v) = command { job.command = Some(v.clone()); changes.push(format!("command → {v}")); }
-    if let Some(v) = dir { job.working_dir = v.clone(); changes.push(format!("dir → {}", v.display())); }
-    if let Some(v) = agent { job.agent = Some(v.clone()); changes.push(format!("agent → {v}")); }
-    if let Some(v) = model { job.model = Some(v.clone()); changes.push(format!("model → {v}")); }
-    if let Some(v) = timeout { job.timeout_secs = Some(v); changes.push(format!("timeout → {v}s")); }
-    if let Some(v) = timezone { job.timezone = Some(v.clone()); changes.push(format!("timezone → {v}")); }
-    if let Some(v) = open_artifact { job.open_artifact = Some(v.clone()); changes.push(format!("open_artifact → {v}")); }
-    if let Some(v) = retry { job.retry_count = v; changes.push(format!("retry → {v}")); }
-    if let Some(v) = retry_delay { job.retry_delay_secs = v; changes.push(format!("retry_delay → {v}s")); }
-    if let Some(v) = notify_start { job.notify_start = v; changes.push(format!("notify_start → {v}")); }
-    if let Some(v) = trust_all_tools { job.trust_all_tools = v; changes.push(format!("trust_all_tools → {v}")); }
-    if let Some(v) = trust_tools {
-        if v.is_empty() { job.trust_tools = None; changes.push("trust_tools → (cleared)".into()); }
-        else { job.trust_tools = Some(v.clone()); changes.push(format!("trust_tools → {v}")); }
+    if let Some(v) = prompt {
+        job.prompt = v.clone();
+        changes.push(format!("prompt → {v}"));
     }
-    if let Some(v) = runner { job.runner = Some(v.clone()); changes.push(format!("runner → {v}")); }
-    if let Some(v) = description { job.description = Some(v.clone()); changes.push(format!("description → {v}")); }
+    if let Some(v) = command {
+        job.command = Some(v.clone());
+        changes.push(format!("command → {v}"));
+    }
+    if let Some(v) = dir {
+        job.working_dir = v.clone();
+        changes.push(format!("dir → {}", v.display()));
+    }
+    if let Some(v) = agent {
+        job.agent = Some(v.clone());
+        changes.push(format!("agent → {v}"));
+    }
+    if let Some(v) = model {
+        job.model = Some(v.clone());
+        changes.push(format!("model → {v}"));
+    }
+    if let Some(v) = timeout {
+        job.timeout_secs = Some(v);
+        changes.push(format!("timeout → {v}s"));
+    }
+    if let Some(v) = timezone {
+        job.timezone = Some(v.clone());
+        changes.push(format!("timezone → {v}"));
+    }
+    if let Some(v) = open_artifact {
+        job.open_artifact = Some(v.clone());
+        changes.push(format!("open_artifact → {v}"));
+    }
+    if let Some(v) = retry {
+        job.retry_count = v;
+        changes.push(format!("retry → {v}"));
+    }
+    if let Some(v) = retry_delay {
+        job.retry_delay_secs = v;
+        changes.push(format!("retry_delay → {v}s"));
+    }
+    if let Some(v) = notify_start {
+        job.notify_start = v;
+        changes.push(format!("notify_start → {v}"));
+    }
+    if let Some(v) = trust_all_tools {
+        job.trust_all_tools = v;
+        changes.push(format!("trust_all_tools → {v}"));
+    }
+    if let Some(v) = trust_tools {
+        if v.is_empty() {
+            job.trust_tools = None;
+            changes.push("trust_tools → (cleared)".into());
+        } else {
+            job.trust_tools = Some(v.clone());
+            changes.push(format!("trust_tools → {v}"));
+        }
+    }
+    if let Some(v) = runner {
+        job.runner = Some(v.clone());
+        changes.push(format!("runner → {v}"));
+    }
+    if let Some(v) = description {
+        job.description = Some(v.clone());
+        changes.push(format!("description → {v}"));
+    }
 
     if changes.is_empty() {
         println!("No changes specified.");
@@ -712,37 +1037,53 @@ fn cmd_list(format: &str) -> boo::error::Result<()> {
         return Ok(());
     }
     let now = Utc::now();
-    let home = dirs::home_dir().map(|h| h.to_string_lossy().to_string()).unwrap_or_default();
+    let home = dirs::home_dir()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_default();
     let active_runs = store.list_active_runs();
 
     // Pre-compute rows
-    let rows: Vec<_> = jobs.iter().map(|job| {
-        let id_short = job.id.to_string()[..8].to_string();
-        let active = active_runs.iter().find(|r| r.job_id == job.id);
-        let enabled = if job.enabled { "yes" } else { "no" }.to_string();
-        let next = if let Some(a) = active {
-            let elapsed = (now - a.started_at).num_seconds();
-            format!("▶ running ({}s)", elapsed)
-        } else if !job.enabled {
-            "disabled".into()
-        } else {
-            cron_eval::next_fire_time(job, now)
+    let rows: Vec<_> = jobs
+        .iter()
+        .map(|job| {
+            let id_short = job.id.to_string()[..8].to_string();
+            let active = active_runs.iter().find(|r| r.job_id == job.id);
+            let enabled = if job.enabled { "yes" } else { "no" }.to_string();
+            let next = if let Some(a) = active {
+                let elapsed = (now - a.started_at).num_seconds();
+                format!("▶ running ({}s)", elapsed)
+            } else if !job.enabled {
+                "disabled".into()
+            } else {
+                cron_eval::next_fire_time(job, now)
+                    .map(|t| t.format("%m-%d %H:%M UTC").to_string())
+                    .unwrap_or_else(|| "done".into())
+            };
+            let last_run = job
+                .last_run
                 .map(|t| t.format("%m-%d %H:%M UTC").to_string())
-                .unwrap_or_else(|| "done".into())
-        };
-        let last_run = job.last_run
-            .map(|t| t.format("%m-%d %H:%M UTC").to_string())
-            .unwrap_or_else(|| "never".into());
-        let (artifact_pattern, artifact_resolved) = match &job.open_artifact {
-            Some(a) => match boo::job::resolve_artifact(&job.working_dir, a) {
-                Some(p) => (a.clone(), Some(p.to_string_lossy().to_string())),
-                None => (a.clone(), None),
-            },
-            None => ("-".into(), None),
-        };
-        let work_dir = job.working_dir.to_string_lossy().replace(&home, "~");
-        (id_short, job.name.clone(), job.schedule_display(), enabled, next, last_run, artifact_pattern, artifact_resolved, work_dir)
-    }).collect();
+                .unwrap_or_else(|| "never".into());
+            let (artifact_pattern, artifact_resolved) = match &job.open_artifact {
+                Some(a) => match boo::job::resolve_artifact(&job.working_dir, a) {
+                    Some(p) => (a.clone(), Some(p.to_string_lossy().to_string())),
+                    None => (a.clone(), None),
+                },
+                None => ("-".into(), None),
+            };
+            let work_dir = job.working_dir.to_string_lossy().replace(&home, "~");
+            (
+                id_short,
+                job.name.clone(),
+                job.schedule_display(),
+                enabled,
+                next,
+                last_run,
+                artifact_pattern,
+                artifact_resolved,
+                work_dir,
+            )
+        })
+        .collect();
 
     match format {
         "json" => {
@@ -772,27 +1113,52 @@ fn cmd_list(format: &str) -> boo::error::Result<()> {
             println!("{}", serde_json::to_string_pretty(&items).unwrap());
         }
         "csv" => {
-            println!("id,name,schedule,enabled,next_fire,last_run,artifact,artifact_file,working_dir");
+            println!(
+                "id,name,schedule,enabled,next_fire,last_run,artifact,artifact_file,working_dir"
+            );
             for r in &rows {
                 fn csv(s: &str) -> String {
                     if s.contains(',') || s.contains('"') || s.contains('\n') {
                         format!("\"{}\"", s.replace('"', "\"\""))
-                    } else { s.to_string() }
+                    } else {
+                        s.to_string()
+                    }
                 }
-                println!("{},{},{},{},{},{},{},{},{}",
-                    csv(&r.0), csv(&r.1), csv(&r.2), csv(&r.3), csv(&r.4), csv(&r.5), csv(&r.6), csv(r.7.as_deref().unwrap_or("")), csv(&r.8));
+                println!(
+                    "{},{},{},{},{},{},{},{},{}",
+                    csv(&r.0),
+                    csv(&r.1),
+                    csv(&r.2),
+                    csv(&r.3),
+                    csv(&r.4),
+                    csv(&r.5),
+                    csv(&r.6),
+                    csv(r.7.as_deref().unwrap_or("")),
+                    csv(&r.8)
+                );
             }
         }
         _ => {
-            let aw = "Artifact".len().max(rows.iter().map(|r| r.6.len()).max().unwrap_or(0)) + 2;
-            let ww = "Working Dir".len().max(rows.iter().map(|r| r.8.len()).max().unwrap_or(0)) + 2;
+            let aw = "Artifact"
+                .len()
+                .max(rows.iter().map(|r| r.6.len()).max().unwrap_or(0))
+                + 2;
+            let ww = "Working Dir"
+                .len()
+                .max(rows.iter().map(|r| r.8.len()).max().unwrap_or(0))
+                + 2;
 
-            println!("{:<8} {:<18} {:<16} {:<7} {:<18} {:<18} {:<aw$} {:<ww$} Latest File", "ID", "Name", "Schedule", "On", "Next Fire", "Last Run", "Artifact", "Working Dir");
+            println!(
+                "{:<8} {:<18} {:<16} {:<7} {:<18} {:<18} {:<aw$} {:<ww$} Latest File",
+                "ID", "Name", "Schedule", "On", "Next Fire", "Last Run", "Artifact", "Working Dir"
+            );
             println!("{}", "-".repeat(87 + aw + ww + 20));
             for r in &rows {
                 let file_col = r.7.as_deref().unwrap_or("-");
-                println!("{:<8} {:<18} {:<16} {:<7} {:<18} {:<18} {:<aw$} {:<ww$} {}",
-                    r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.8, file_col);
+                println!(
+                    "{:<8} {:<18} {:<16} {:<7} {:<18} {:<18} {:<aw$} {:<ww$} {}",
+                    r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.8, file_col
+                );
             }
         }
     }
@@ -804,7 +1170,11 @@ fn cmd_set_enabled(target: &str, enabled: bool) -> boo::error::Result<()> {
     let mut job = resolve_job(&store, target)?;
     job.enabled = enabled;
     store.update_job(&job)?;
-    println!("{} job '{}'", if enabled { "Enabled" } else { "Disabled" }, job.name);
+    println!(
+        "{} job '{}'",
+        if enabled { "Enabled" } else { "Disabled" },
+        job.name
+    );
     Ok(())
 }
 
@@ -813,23 +1183,30 @@ fn cmd_status(format: &str) -> boo::error::Result<()> {
     let running = is_daemon_running(&boo_dir.join("daemon.pid"));
 
     let store = JobStore::new()?;
-    let jobs: Vec<_> = store.load_jobs()?.into_iter().filter(|j| j.enabled).collect();
+    let jobs: Vec<_> = store
+        .load_jobs()?
+        .into_iter()
+        .filter(|j| j.enabled)
+        .collect();
     let active_runs = store.list_active_runs();
     let now = Utc::now();
 
     if format == "json" {
-        let next_fires: Vec<_> = jobs.iter().map(|job| {
-            let active = active_runs.iter().find(|r| r.job_id == job.id);
-            serde_json::json!({
-                "name": job.name,
-                "id": job.id.to_string(),
-                "schedule": job.schedule_display(),
-                "next_fire": cron_eval::next_fire_time(job, now).map(|t| t.to_rfc3339()),
-                "running": active.is_some(),
-                "pid": active.map(|a| a.pid),
-                "running_since": active.map(|a| a.started_at.to_rfc3339()),
+        let next_fires: Vec<_> = jobs
+            .iter()
+            .map(|job| {
+                let active = active_runs.iter().find(|r| r.job_id == job.id);
+                serde_json::json!({
+                    "name": job.name,
+                    "id": job.id.to_string(),
+                    "schedule": job.schedule_display(),
+                    "next_fire": cron_eval::next_fire_time(job, now).map(|t| t.to_rfc3339()),
+                    "running": active.is_some(),
+                    "pid": active.map(|a| a.pid),
+                    "running_since": active.map(|a| a.started_at.to_rfc3339()),
+                })
             })
-        }).collect();
+            .collect();
         let obj = serde_json::json!({
             "daemon_running": running,
             "enabled_jobs": jobs.len(),
@@ -847,7 +1224,10 @@ fn cmd_status(format: &str) -> boo::error::Result<()> {
         for run in &active_runs {
             let elapsed = (now - run.started_at).num_seconds();
             let source = if run.manual { "manual" } else { "daemon" };
-            println!("  {} - pid {} ({source}, {elapsed}s elapsed)", run.job_name, run.pid);
+            println!(
+                "  {} - pid {} ({source}, {elapsed}s elapsed)",
+                run.job_name, run.pid
+            );
         }
     }
 
@@ -860,7 +1240,12 @@ fn cmd_status(format: &str) -> boo::error::Result<()> {
         let active = active_runs.iter().any(|r| r.job_id == job.id);
         let prefix = if active { "▶ " } else { "  " };
         match cron_eval::next_fire_time(&job, now) {
-            Some(next) => println!("{prefix}{} - {} ({})", job.name, next.format("%Y-%m-%d %H:%M:%S UTC"), job.schedule_display()),
+            Some(next) => println!(
+                "{prefix}{} - {} ({})",
+                job.name,
+                next.format("%Y-%m-%d %H:%M:%S UTC"),
+                job.schedule_display()
+            ),
             None => println!("{prefix}{} - done", job.name),
         }
     }
@@ -901,33 +1286,41 @@ fn cmd_logs(target: &str, count: usize, output: bool, format: &str) -> boo::erro
         return Ok(());
     }
     if format == "json" {
-        let items: Vec<_> = records.iter().map(|r| {
-            serde_json::json!({
-                "job_id": r.job_id.to_string(),
-                "job_name": r.job_name,
-                "fired_at": r.fired_at.to_rfc3339(),
-                "scheduled_for": r.scheduled_for.to_rfc3339(),
-                "missed_count": r.missed_count,
-                "duration_secs": r.duration_secs,
-                "exit_code": r.exit_code,
-                "success": r.success,
-                "manual": r.manual,
-                "output_path": r.output_path.to_string_lossy(),
+        let items: Vec<_> = records
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "job_id": r.job_id.to_string(),
+                    "job_name": r.job_name,
+                    "fired_at": r.fired_at.to_rfc3339(),
+                    "scheduled_for": r.scheduled_for.to_rfc3339(),
+                    "missed_count": r.missed_count,
+                    "duration_secs": r.duration_secs,
+                    "exit_code": r.exit_code,
+                    "success": r.success,
+                    "manual": r.manual,
+                    "output_path": r.output_path.to_string_lossy(),
+                })
             })
-        }).collect();
+            .collect();
         println!("{}", serde_json::to_string_pretty(&items).unwrap());
         return Ok(());
     }
     println!("Recent runs for '{}':", job.name);
-    println!("{:<20} {:<8} {:<10} {:<8} {:<6}", "Fired At", "OK", "Duration", "Missed", "Type");
+    println!(
+        "{:<20} {:<8} {:<10} {:<8} {:<6}",
+        "Fired At", "OK", "Duration", "Missed", "Type"
+    );
     println!("{}", "-".repeat(56));
     for r in records {
-        println!("{:<20} {:<8} {:<10} {:<8} {:<6}",
+        println!(
+            "{:<20} {:<8} {:<10} {:<8} {:<6}",
             r.fired_at.format("%Y-%m-%d %H:%M:%S"),
             if r.success { "yes" } else { "no" },
             format!("{:.2}s", r.duration_secs),
             r.missed_count,
-            if r.manual { "manual" } else { "cron" });
+            if r.manual { "manual" } else { "cron" }
+        );
     }
     Ok(())
 }
@@ -942,21 +1335,35 @@ fn launch_interactive_session(
     let mut cmd = std::process::Command::new(&config.kiro_cli_path);
     cmd.arg("chat");
     match resume {
-        Some(true) => { cmd.arg("--resume-picker"); }
-        Some(false) => { cmd.arg("--resume"); }
+        Some(true) => {
+            cmd.arg("--resume-picker");
+        }
+        Some(false) => {
+            cmd.arg("--resume");
+        }
         None => {}
     }
-    if let Some(a) = agent { cmd.args(["--agent", a]); }
-    if let Some(p) = prompt { cmd.args(["--", p]); }
+    if let Some(a) = agent {
+        cmd.args(["--agent", a]);
+    }
+    if let Some(p) = prompt {
+        cmd.args(["--", p]);
+    }
     cmd.current_dir(dir);
     let status = cmd.status().map_err(boo::error::BooError::Io)?;
     if !status.success() {
-        return Err(boo::error::BooError::Other("kiro-cli session exited with error".into()));
+        return Err(boo::error::BooError::Other(
+            "kiro-cli session exited with error".into(),
+        ));
     }
     Ok(())
 }
 
-fn cmd_resume(target: Option<&str>, prompt: Option<&str>, previous: bool) -> boo::error::Result<()> {
+fn cmd_resume(
+    target: Option<&str>,
+    prompt: Option<&str>,
+    previous: bool,
+) -> boo::error::Result<()> {
     let (dir, agent) = if let Some(t) = target {
         let store = JobStore::new()?;
         let job = resolve_job(&store, t)?;
@@ -973,17 +1380,20 @@ fn cmd_running(format: &str) -> boo::error::Result<()> {
     let now = Utc::now();
 
     if format == "json" {
-        let items: Vec<_> = active_runs.iter().map(|run| {
-            let elapsed = (now - run.started_at).num_seconds();
-            serde_json::json!({
-                "job_name": run.job_name,
-                "job_id": run.job_id.to_string()[..8],
-                "pid": run.pid,
-                "source": if run.manual { "manual" } else { "daemon" },
-                "started_at": run.started_at.to_rfc3339(),
-                "elapsed_secs": elapsed,
+        let items: Vec<_> = active_runs
+            .iter()
+            .map(|run| {
+                let elapsed = (now - run.started_at).num_seconds();
+                serde_json::json!({
+                    "job_name": run.job_name,
+                    "job_id": run.job_id.to_string()[..8],
+                    "pid": run.pid,
+                    "source": if run.manual { "manual" } else { "daemon" },
+                    "started_at": run.started_at.to_rfc3339(),
+                    "elapsed_secs": elapsed,
+                })
             })
-        }).collect();
+            .collect();
         println!("{}", serde_json::to_string_pretty(&items).unwrap());
         return Ok(());
     }
@@ -993,7 +1403,10 @@ fn cmd_running(format: &str) -> boo::error::Result<()> {
         return Ok(());
     }
 
-    println!("{:<20} {:<10} {:>7} {:>10} Source", "Job", "ID", "PID", "Elapsed");
+    println!(
+        "{:<20} {:<10} {:>7} {:>10} Source",
+        "Job", "ID", "PID", "Elapsed"
+    );
     println!("{}", "-".repeat(60));
     for run in &active_runs {
         let elapsed = (now - run.started_at).num_seconds();
@@ -1005,7 +1418,14 @@ fn cmd_running(format: &str) -> boo::error::Result<()> {
             format!("{}s", elapsed)
         };
         let source = if run.manual { "manual" } else { "daemon" };
-        println!("{:<20} {:<10} {:>7} {:>10} {}", run.job_name, &run.job_id.to_string()[..8], run.pid, elapsed_str, source);
+        println!(
+            "{:<20} {:<10} {:>7} {:>10} {}",
+            run.job_name,
+            &run.job_id.to_string()[..8],
+            run.pid,
+            elapsed_str,
+            source
+        );
     }
     Ok(())
 }
@@ -1034,7 +1454,9 @@ fn cmd_kill(target: &str) -> boo::error::Result<()> {
                 // Give it a moment, then force kill if still alive
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 if boo::is_pid_alive(run.pid) {
-                    unsafe { libc::killpg(run.pid as i32, libc::SIGKILL); }
+                    unsafe {
+                        libc::killpg(run.pid as i32, libc::SIGKILL);
+                    }
                 }
             }
             #[cfg(windows)]
@@ -1055,15 +1477,18 @@ fn cmd_clean(keep_logs: bool, dry_run: bool) -> boo::error::Result<()> {
     let jobs = store.load_jobs()?;
     let now = Utc::now();
 
-    let done_jobs: Vec<&Job> = jobs.iter()
-        .filter(|j| j.enabled && {
-            // A one-shot is "done" if next_fire is None (already ran) OR
-            // if it's an at_time job whose time has passed (never ran but expired)
-            let next = cron_eval::next_fire_time(j, now);
-            match next {
-                None => true,
-                Some(t) if j.at_time.is_some() && t < now => true,
-                _ => false,
+    let done_jobs: Vec<&Job> = jobs
+        .iter()
+        .filter(|j| {
+            j.enabled && {
+                // A one-shot is "done" if next_fire is None (already ran) OR
+                // if it's an at_time job whose time has passed (never ran but expired)
+                let next = cron_eval::next_fire_time(j, now);
+                match next {
+                    None => true,
+                    Some(t) if j.at_time.is_some() && t < now => true,
+                    _ => false,
+                }
             }
         })
         .collect();
@@ -1079,7 +1504,10 @@ fn cmd_clean(keep_logs: bool, dry_run: bool) -> boo::error::Result<()> {
     }
 
     if dry_run {
-        println!("\n{} job(s) would be removed. Run without --dry-run to apply.", done_jobs.len());
+        println!(
+            "\n{} job(s) would be removed. Run without --dry-run to apply.",
+            done_jobs.len()
+        );
         return Ok(());
     }
 
@@ -1099,7 +1527,11 @@ fn cmd_clean(keep_logs: bool, dry_run: bool) -> boo::error::Result<()> {
         store.remove_job(job.id)?;
         removed += 1;
     }
-    println!("\nCleaned {} job(s){}", removed, if keep_logs { " (logs kept)" } else { "" });
+    println!(
+        "\nCleaned {} job(s){}",
+        removed,
+        if keep_logs { " (logs kept)" } else { "" }
+    );
     Ok(())
 }
 
@@ -1113,8 +1545,13 @@ async fn cmd_wait(target: &str, interval: u64) -> boo::error::Result<()> {
         // Not running — show last run result
         let records = store.load_run_records(job.id, 1)?;
         if let Some(last) = records.last() {
-            println!("Job '{}' is not running. Last run: success={}, duration={:.2}s ({})",
-                job.name, last.success, last.duration_secs, last.fired_at.format("%Y-%m-%d %H:%M:%S UTC"));
+            println!(
+                "Job '{}' is not running. Last run: success={}, duration={:.2}s ({})",
+                job.name,
+                last.success,
+                last.duration_secs,
+                last.fired_at.format("%Y-%m-%d %H:%M:%S UTC")
+            );
         } else {
             println!("Job '{}' is not running and has no run history.", job.name);
         }
@@ -1134,9 +1571,15 @@ async fn cmd_wait(target: &str, interval: u64) -> boo::error::Result<()> {
     // Show result
     let records = store.load_run_records(job.id, 1)?;
     if let Some(last) = records.last() {
-        let status = if last.success { "✓ succeeded" } else { "✗ failed" };
+        let status = if last.success {
+            "✓ succeeded"
+        } else {
+            "✗ failed"
+        };
         println!("Job '{}' {status} in {:.2}s", job.name, last.duration_secs);
-        if !last.success { std::process::exit(1); }
+        if !last.success {
+            std::process::exit(1);
+        }
     } else {
         println!("Job '{}' finished (no run record found).", job.name);
     }
@@ -1164,8 +1607,11 @@ fn cmd_stats(target: Option<&str>, format: &str) -> boo::error::Result<()> {
     };
 
     if jobs.is_empty() {
-        if format == "json" { println!("{{\"jobs\":[],\"total\":{{}}}}"); }
-        else { println!("No jobs configured"); }
+        if format == "json" {
+            println!("{{\"jobs\":[],\"total\":{{}}}}");
+        } else {
+            println!("No jobs configured");
+        }
         return Ok(());
     }
 
@@ -1176,12 +1622,24 @@ fn cmd_stats(target: Option<&str>, format: &str) -> boo::error::Result<()> {
 
     #[derive(Default)]
     struct Stats {
-        total: u64, successes: u64, failures: u64, manual: u64,
-        total_missed: u64, total_duration: f64, max_duration: f64,
-        last_success: Option<DateTime<Utc>>, last_failure: Option<DateTime<Utc>>,
-        runs_24h: u64, ok_24h: u64, fail_24h: u64,
-        runs_7d: u64, ok_7d: u64, fail_7d: u64,
-        runs_30d: u64, ok_30d: u64, fail_30d: u64,
+        total: u64,
+        successes: u64,
+        failures: u64,
+        manual: u64,
+        total_missed: u64,
+        total_duration: f64,
+        max_duration: f64,
+        last_success: Option<DateTime<Utc>>,
+        last_failure: Option<DateTime<Utc>>,
+        runs_24h: u64,
+        ok_24h: u64,
+        fail_24h: u64,
+        runs_7d: u64,
+        ok_7d: u64,
+        fail_7d: u64,
+        runs_30d: u64,
+        ok_30d: u64,
+        fail_30d: u64,
     }
 
     let mut all_stats: Vec<(String, String, Stats)> = Vec::new();
@@ -1192,31 +1650,96 @@ fn cmd_stats(target: Option<&str>, format: &str) -> boo::error::Result<()> {
         let mut s = Stats::default();
         for r in &records {
             s.total += 1;
-            if r.success { s.successes += 1; } else { s.failures += 1; }
-            if r.manual { s.manual += 1; }
+            if r.success {
+                s.successes += 1;
+            } else {
+                s.failures += 1;
+            }
+            if r.manual {
+                s.manual += 1;
+            }
             s.total_missed += r.missed_count as u64;
             s.total_duration += r.duration_secs;
-            if r.duration_secs > s.max_duration { s.max_duration = r.duration_secs; }
-            if r.success { s.last_success = Some(s.last_success.map_or(r.fired_at, |prev: DateTime<Utc>| prev.max(r.fired_at))); }
-            else { s.last_failure = Some(s.last_failure.map_or(r.fired_at, |prev: DateTime<Utc>| prev.max(r.fired_at))); }
-            if r.fired_at >= window_24h { s.runs_24h += 1; if r.success { s.ok_24h += 1; } else { s.fail_24h += 1; } }
-            if r.fired_at >= window_7d { s.runs_7d += 1; if r.success { s.ok_7d += 1; } else { s.fail_7d += 1; } }
-            if r.fired_at >= window_30d { s.runs_30d += 1; if r.success { s.ok_30d += 1; } else { s.fail_30d += 1; } }
+            if r.duration_secs > s.max_duration {
+                s.max_duration = r.duration_secs;
+            }
+            if r.success {
+                s.last_success = Some(
+                    s.last_success
+                        .map_or(r.fired_at, |prev: DateTime<Utc>| prev.max(r.fired_at)),
+                );
+            } else {
+                s.last_failure = Some(
+                    s.last_failure
+                        .map_or(r.fired_at, |prev: DateTime<Utc>| prev.max(r.fired_at)),
+                );
+            }
+            if r.fired_at >= window_24h {
+                s.runs_24h += 1;
+                if r.success {
+                    s.ok_24h += 1;
+                } else {
+                    s.fail_24h += 1;
+                }
+            }
+            if r.fired_at >= window_7d {
+                s.runs_7d += 1;
+                if r.success {
+                    s.ok_7d += 1;
+                } else {
+                    s.fail_7d += 1;
+                }
+            }
+            if r.fired_at >= window_30d {
+                s.runs_30d += 1;
+                if r.success {
+                    s.ok_30d += 1;
+                } else {
+                    s.fail_30d += 1;
+                }
+            }
         }
-        global.total += s.total; global.successes += s.successes; global.failures += s.failures;
-        global.manual += s.manual; global.total_missed += s.total_missed;
+        global.total += s.total;
+        global.successes += s.successes;
+        global.failures += s.failures;
+        global.manual += s.manual;
+        global.total_missed += s.total_missed;
         global.total_duration += s.total_duration;
-        if s.max_duration > global.max_duration { global.max_duration = s.max_duration; }
-        global.runs_24h += s.runs_24h; global.ok_24h += s.ok_24h; global.fail_24h += s.fail_24h;
-        global.runs_7d += s.runs_7d; global.ok_7d += s.ok_7d; global.fail_7d += s.fail_7d;
-        global.runs_30d += s.runs_30d; global.ok_30d += s.ok_30d; global.fail_30d += s.fail_30d;
-        if let Some(t) = s.last_success { global.last_success = Some(global.last_success.map_or(t, |p: DateTime<Utc>| p.max(t))); }
-        if let Some(t) = s.last_failure { global.last_failure = Some(global.last_failure.map_or(t, |p: DateTime<Utc>| p.max(t))); }
+        if s.max_duration > global.max_duration {
+            global.max_duration = s.max_duration;
+        }
+        global.runs_24h += s.runs_24h;
+        global.ok_24h += s.ok_24h;
+        global.fail_24h += s.fail_24h;
+        global.runs_7d += s.runs_7d;
+        global.ok_7d += s.ok_7d;
+        global.fail_7d += s.fail_7d;
+        global.runs_30d += s.runs_30d;
+        global.ok_30d += s.ok_30d;
+        global.fail_30d += s.fail_30d;
+        if let Some(t) = s.last_success {
+            global.last_success = Some(global.last_success.map_or(t, |p: DateTime<Utc>| p.max(t)));
+        }
+        if let Some(t) = s.last_failure {
+            global.last_failure = Some(global.last_failure.map_or(t, |p: DateTime<Utc>| p.max(t)));
+        }
         all_stats.push((job.name.clone(), job.id.to_string(), s));
     }
 
-    fn rate(ok: u64, total: u64) -> f64 { if total == 0 { 0.0 } else { ok as f64 / total as f64 * 100.0 } }
-    fn avg(total_dur: f64, count: u64) -> f64 { if count == 0 { 0.0 } else { total_dur / count as f64 } }
+    fn rate(ok: u64, total: u64) -> f64 {
+        if total == 0 {
+            0.0
+        } else {
+            ok as f64 / total as f64 * 100.0
+        }
+    }
+    fn avg(total_dur: f64, count: u64) -> f64 {
+        if count == 0 {
+            0.0
+        } else {
+            total_dur / count as f64
+        }
+    }
 
     fn stats_json(s: &Stats) -> serde_json::Value {
         serde_json::json!({
@@ -1234,12 +1757,15 @@ fn cmd_stats(target: Option<&str>, format: &str) -> boo::error::Result<()> {
     }
 
     if format == "json" {
-        let job_items: Vec<_> = all_stats.iter().map(|(name, id, s)| {
-            let mut v = stats_json(s);
-            v["name"] = serde_json::json!(name);
-            v["id"] = serde_json::json!(id);
-            v
-        }).collect();
+        let job_items: Vec<_> = all_stats
+            .iter()
+            .map(|(name, id, s)| {
+                let mut v = stats_json(s);
+                v["name"] = serde_json::json!(name);
+                v["id"] = serde_json::json!(id);
+                v
+            })
+            .collect();
         let obj = serde_json::json!({ "jobs": job_items, "total": stats_json(&global) });
         println!("{}", serde_json::to_string_pretty(&obj).unwrap());
         return Ok(());
@@ -1248,27 +1774,54 @@ fn cmd_stats(target: Option<&str>, format: &str) -> boo::error::Result<()> {
     if format == "csv" {
         println!("name,runs,ok,fail,manual,missed,avg_time,max_time,success_rate");
         for (name, _, s) in &all_stats {
-            println!("{},{},{},{},{},{},{:.2},{:.2},{:.1}",
-                name, s.total, s.successes, s.failures, s.manual, s.total_missed,
-                avg(s.total_duration, s.total), s.max_duration, rate(s.successes, s.total));
+            println!(
+                "{},{},{},{},{},{},{:.2},{:.2},{:.1}",
+                name,
+                s.total,
+                s.successes,
+                s.failures,
+                s.manual,
+                s.total_missed,
+                avg(s.total_duration, s.total),
+                s.max_duration,
+                rate(s.successes, s.total)
+            );
         }
         return Ok(());
     }
 
     // Table format
-    println!("{:<18} {:>5} {:>4} {:>5} {:>6} {:>7} {:>9} {:>8}",
-        "Job", "Runs", "OK", "Fail", "Missed", "Avg Time", "Max Time", "Success%");
+    println!(
+        "{:<18} {:>5} {:>4} {:>5} {:>6} {:>7} {:>9} {:>8}",
+        "Job", "Runs", "OK", "Fail", "Missed", "Avg Time", "Max Time", "Success%"
+    );
     println!("{}", "-".repeat(78));
     for (name, _, s) in &all_stats {
-        println!("{:<18} {:>5} {:>4} {:>5} {:>6} {:>7.1}s {:>8.1}s {:>7.1}%",
-            name, s.total, s.successes, s.failures, s.total_missed,
-            avg(s.total_duration, s.total), s.max_duration, rate(s.successes, s.total));
+        println!(
+            "{:<18} {:>5} {:>4} {:>5} {:>6} {:>7.1}s {:>8.1}s {:>7.1}%",
+            name,
+            s.total,
+            s.successes,
+            s.failures,
+            s.total_missed,
+            avg(s.total_duration, s.total),
+            s.max_duration,
+            rate(s.successes, s.total)
+        );
     }
     if all_stats.len() > 1 {
         println!("{}", "-".repeat(78));
-        println!("{:<18} {:>5} {:>4} {:>5} {:>6} {:>7.1}s {:>8.1}s {:>7.1}%",
-            "TOTAL", global.total, global.successes, global.failures, global.total_missed,
-            avg(global.total_duration, global.total), global.max_duration, rate(global.successes, global.total));
+        println!(
+            "{:<18} {:>5} {:>4} {:>5} {:>6} {:>7.1}s {:>8.1}s {:>7.1}%",
+            "TOTAL",
+            global.total,
+            global.successes,
+            global.failures,
+            global.total_missed,
+            avg(global.total_duration, global.total),
+            global.max_duration,
+            rate(global.successes, global.total)
+        );
     }
     Ok(())
 }
@@ -1281,20 +1834,41 @@ fn cron_to_human(job: &Job) -> String {
         return format!("Once at {}", at.format("%b %d, %I:%M %p UTC"));
     }
     if let Some(secs) = job.every_secs {
-        return if secs >= 86400 { format!("Every {} day(s)", secs / 86400) }
-        else if secs >= 3600 { format!("Every {} hour(s)", secs / 3600) }
-        else if secs >= 60 { format!("Every {} minute(s)", secs / 60) }
-        else { format!("Every {} second(s)", secs) };
+        return if secs >= 86400 {
+            format!("Every {} day(s)", secs / 86400)
+        } else if secs >= 3600 {
+            format!("Every {} hour(s)", secs / 3600)
+        } else if secs >= 60 {
+            format!("Every {} minute(s)", secs / 60)
+        } else {
+            format!("Every {} second(s)", secs)
+        };
     }
     let parts: Vec<&str> = job.cron_expr.split_whitespace().collect();
-    if parts.len() != 5 { return job.cron_expr.clone(); }
+    if parts.len() != 5 {
+        return job.cron_expr.clone();
+    }
     let (min, hour, _dom, _mon, dow) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
 
     let time = match (hour, min) {
-        (h, m) if !h.contains('*') && !h.contains('/') && !h.contains('-') && !m.contains('*') && !m.contains('/') => {
+        (h, m)
+            if !h.contains('*')
+                && !h.contains('/')
+                && !h.contains('-')
+                && !m.contains('*')
+                && !m.contains('/') =>
+        {
             let h: u32 = h.parse().unwrap_or(0);
             let m: u32 = m.parse().unwrap_or(0);
-            let (h12, ampm) = if h == 0 { (12, "AM") } else if h < 12 { (h, "AM") } else if h == 12 { (12, "PM") } else { (h - 12, "PM") };
+            let (h12, ampm) = if h == 0 {
+                (12, "AM")
+            } else if h < 12 {
+                (h, "AM")
+            } else if h == 12 {
+                (12, "PM")
+            } else {
+                (h - 12, "PM")
+            };
             format!("{h12}:{m:02} {ampm} UTC")
         }
         _ if min.starts_with("*/") && hour.contains('-') => {
@@ -1325,7 +1899,10 @@ fn resolve_job(store: &JobStore, target: &str) -> boo::error::Result<Job> {
     if let Ok(uuid) = Uuid::parse_str(target) {
         return store.get_job(uuid);
     }
-    store.load_jobs()?.into_iter().find(|j| j.name == target)
+    store
+        .load_jobs()?
+        .into_iter()
+        .find(|j| j.name == target)
         .ok_or_else(|| boo::error::BooError::Other(format!("Job not found: {target}")))
 }
 
@@ -1333,13 +1910,17 @@ fn resolve_job(store: &JobStore, target: &str) -> boo::error::Result<Job> {
 pub fn parse_duration(s: &str) -> boo::error::Result<u64> {
     let s = s.trim();
     let (num, suffix) = s.split_at(s.len().saturating_sub(1));
-    let n: u64 = num.parse().map_err(|_| boo::error::BooError::Other(format!("Invalid duration: {s}")))?;
+    let n: u64 = num
+        .parse()
+        .map_err(|_| boo::error::BooError::Other(format!("Invalid duration: {s}")))?;
     match suffix {
         "s" => Ok(n),
         "m" => Ok(n * 60),
         "h" => Ok(n * 3600),
         "d" => Ok(n * 86400),
-        _ => Err(boo::error::BooError::Other(format!("Invalid duration suffix: {s}. Use s/m/h/d")))
+        _ => Err(boo::error::BooError::Other(format!(
+            "Invalid duration suffix: {s}. Use s/m/h/d"
+        ))),
     }
 }
 
@@ -1371,7 +1952,14 @@ async fn parse_at_time(input: &str) -> boo::error::Result<DateTime<Utc>> {
     eprintln!("Parsing '{}' via AI...", input);
 
     let output = tokio::process::Command::new(&config.kiro_cli_path)
-        .args(["chat", "--no-interactive", "--trust-tools=", "--wrap", "never", &prompt])
+        .args([
+            "chat",
+            "--no-interactive",
+            "--trust-tools=",
+            "--wrap",
+            "never",
+            &prompt,
+        ])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output()
@@ -1381,18 +1969,28 @@ async fn parse_at_time(input: &str) -> boo::error::Result<DateTime<Utc>> {
     let raw = String::from_utf8_lossy(&output.stdout);
     // Strip ANSI codes and find the timestamp
     let cleaned = boo::strip_ansi(&raw);
-    let timestamp = cleaned.lines()
+    let timestamp = cleaned
+        .lines()
         .filter_map(|line| {
             let l = line.trim().trim_start_matches('>').trim();
-            chrono::DateTime::parse_from_rfc3339(l).ok()
+            chrono::DateTime::parse_from_rfc3339(l)
+                .ok()
                 .map(|dt| dt.with_timezone(&Utc))
         })
         .next()
-        .ok_or_else(|| boo::error::BooError::Other(
-            format!("Could not parse AI response as timestamp: {}", cleaned.trim())))?;
+        .ok_or_else(|| {
+            boo::error::BooError::Other(format!(
+                "Could not parse AI response as timestamp: {}",
+                cleaned.trim()
+            ))
+        })?;
 
     // Confirm with user
-    eprintln!("Parsed '{}' → {}", input, timestamp.format("%Y-%m-%d %H:%M:%S UTC"));
+    eprintln!(
+        "Parsed '{}' → {}",
+        input,
+        timestamp.format("%Y-%m-%d %H:%M:%S UTC")
+    );
     eprint!("Confirm? [Y/n] ");
     let mut confirm = String::new();
     std::io::stdin().read_line(&mut confirm).ok();
@@ -1407,7 +2005,9 @@ fn is_daemon_running(pid_path: &std::path::Path) -> bool {
     // Primary: check PID file
     if let Ok(pid_str) = std::fs::read_to_string(pid_path) {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
-            if boo::is_pid_alive(pid) { return true; }
+            if boo::is_pid_alive(pid) {
+                return true;
+            }
         }
     }
 

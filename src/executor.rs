@@ -17,7 +17,9 @@ pub struct ExecutionResult {
 
 /// Strip ANSI escape sequences from text.
 fn strip_ansi(s: &[u8]) -> String {
-    crate::strip_ansi(&String::from_utf8_lossy(s)).trim().to_string()
+    crate::strip_ansi(&String::from_utf8_lossy(s))
+        .trim()
+        .to_string()
 }
 
 /// A runner knows how to build a command and prepare stdin for a job.
@@ -33,10 +35,18 @@ impl Runner for KiroRunner {
     fn build_command(&self, job: &Job, config: &Config) -> Command {
         let mut cmd = Command::new(&config.kiro_cli_path);
         cmd.args(["chat", "--no-interactive", "--wrap", "never"]);
-        if job.trust_all_tools { cmd.arg("--trust-all-tools"); }
-        if let Some(ref tools) = job.trust_tools { cmd.args(["--trust-tools", tools]); }
-        if let Some(ref agent) = job.agent { cmd.args(["--agent", agent]); }
-        if let Some(ref model) = job.model { cmd.args(["--model", model]); }
+        if job.trust_all_tools {
+            cmd.arg("--trust-all-tools");
+        }
+        if let Some(ref tools) = job.trust_tools {
+            cmd.args(["--trust-tools", tools]);
+        }
+        if let Some(ref agent) = job.agent {
+            cmd.args(["--agent", agent]);
+        }
+        if let Some(ref model) = job.model {
+            cmd.args(["--model", model]);
+        }
         cmd.current_dir(&job.working_dir);
         cmd.env("BOO_NON_INTERACTIVE", "1");
         cmd.env("BOO_JOB_NAME", &job.name);
@@ -72,7 +82,9 @@ impl Runner for ShellRunner {
         cmd
     }
 
-    fn stdin_bytes(&self, _job: &Job) -> Option<Vec<u8>> { None }
+    fn stdin_bytes(&self, _job: &Job) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 /// Get the appropriate runner for a job.
@@ -87,9 +99,13 @@ pub fn get_runner(job: &Job) -> Box<dyn Runner> {
 /// Execute a job, capturing output to log file.
 pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<ExecutionResult> {
     // Ensure working dir and log dir exist
-    tokio::fs::create_dir_all(&job.working_dir).await.map_err(BooError::Io)?;
+    tokio::fs::create_dir_all(&job.working_dir)
+        .await
+        .map_err(BooError::Io)?;
     if let Some(parent) = log_path.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(BooError::Io)?;
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(BooError::Io)?;
     }
 
     let runner = get_runner(job);
@@ -97,10 +113,17 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
     let timeout_secs = job.timeout_secs.unwrap_or(config.default_timeout_secs);
 
     let mut cmd = runner.build_command(job, config);
-    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     // Spawn in new process group so we can kill all descendants on timeout
     #[cfg(unix)]
-    unsafe { cmd.pre_exec(|| { libc::setpgid(0, 0); Ok(()) }); }
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setpgid(0, 0);
+            Ok(())
+        });
+    }
 
     let mut child = cmd.spawn().map_err(BooError::Io)?;
 
@@ -120,21 +143,27 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
         let copy_out = async {
             let mut buf = Vec::new();
             if let Some(out) = stdout {
-                tokio::io::copy(&mut BufReader::new(out), &mut buf).await.map_err(BooError::Io)?;
+                tokio::io::copy(&mut BufReader::new(out), &mut buf)
+                    .await
+                    .map_err(BooError::Io)?;
             }
             Ok::<_, BooError>(buf)
         };
         let copy_err = async {
             let mut buf = Vec::new();
             if let Some(err) = stderr {
-                tokio::io::copy(&mut BufReader::new(err), &mut buf).await.map_err(BooError::Io)?;
+                tokio::io::copy(&mut BufReader::new(err), &mut buf)
+                    .await
+                    .map_err(BooError::Io)?;
             }
             Ok::<_, BooError>(buf)
         };
         let (out_buf, err_buf) = tokio::try_join!(copy_out, copy_err)?;
 
         // Write full log (stdout + stderr)
-        let log_file = tokio::fs::File::create(log_path).await.map_err(BooError::Io)?;
+        let log_file = tokio::fs::File::create(log_path)
+            .await
+            .map_err(BooError::Io)?;
         let mut writer = tokio::io::BufWriter::new(log_file);
         writer.write_all(&out_buf).await.map_err(BooError::Io)?;
         writer.write_all(&err_buf).await.map_err(BooError::Io)?;
@@ -165,7 +194,9 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
             // Kill entire process group (child + all descendants)
             #[cfg(unix)]
             if let Some(id) = child.id() {
-                unsafe { libc::killpg(id as i32, libc::SIGKILL); }
+                unsafe {
+                    libc::killpg(id as i32, libc::SIGKILL);
+                }
             }
             let _ = child.kill().await;
             Err(BooError::JobTimeout(timeout_secs))
@@ -177,7 +208,7 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
 mod tests {
     use super::*;
     use crate::job::Job;
-    
+
     use tempfile::tempdir;
 
     fn test_job() -> Job {

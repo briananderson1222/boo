@@ -5,15 +5,17 @@ pub mod error;
 pub mod executor;
 pub mod installer;
 pub mod job;
-pub mod notifier;
 pub mod notification_service;
+pub mod notifier;
 pub mod scheduler;
 pub mod store;
 
 /// Check if a process with the given PID is alive.
 pub fn is_pid_alive(pid: u32) -> bool {
     #[cfg(unix)]
-    { unsafe { libc::kill(pid as i32, 0) == 0 } }
+    {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
 
     #[cfg(windows)]
     {
@@ -39,7 +41,9 @@ pub fn strip_ansi(s: &str) -> String {
                 chars.next();
                 while let Some(&nc) = chars.peek() {
                     chars.next();
-                    if nc.is_ascii_alphabetic() { break; }
+                    if nc.is_ascii_alphabetic() {
+                        break;
+                    }
                 }
             }
         } else if c != '\x07' {

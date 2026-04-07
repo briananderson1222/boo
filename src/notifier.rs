@@ -4,7 +4,9 @@ use crate::notification_service::{NotificationSender, NotifyRequest};
 
 /// Fire-and-forget HTTP POST to a webhook URL. Non-blocking, errors are silently ignored.
 pub fn notify_webhook(url: &str, event: serde_json::Value) {
-    if cfg!(test) { return; }
+    if cfg!(test) {
+        return;
+    }
     let url = url.to_string();
     let body = serde_json::to_string(&event).unwrap_or_default();
     tokio::spawn(async move {
@@ -12,10 +14,15 @@ pub fn notify_webhook(url: &str, event: serde_json::Value) {
     });
 }
 
-async fn webhook_post(url: &str, body: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn webhook_post(
+    url: &str,
+    body: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let url = url::Url::parse(url)?;
     let host = url.host_str().unwrap_or("localhost");
-    let port = url.port().unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
+    let port = url
+        .port()
+        .unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
     let path = if url.query().is_some() {
         format!("{}?{}", url.path(), url.query().unwrap())
     } else {
@@ -34,16 +41,29 @@ async fn webhook_post(url: &str, body: &str) -> Result<(), Box<dyn std::error::E
 /// Build summary and body strings for a job result notification.
 fn format_notification(job: &Job, result: &ExecutionResult) -> (String, String) {
     let summary = if result.success {
-        format!("✓ Job '{}' completed ({:.1}s)", job.name, result.duration_secs)
+        format!(
+            "✓ Job '{}' completed ({:.1}s)",
+            job.name, result.duration_secs
+        )
     } else {
-        let code = result.exit_code.map(|c| format!("exit {c}")).unwrap_or("killed".into());
-        format!("✗ Job '{}' failed ({}, {:.1}s)", job.name, code, result.duration_secs)
+        let code = result
+            .exit_code
+            .map(|c| format!("exit {c}"))
+            .unwrap_or("killed".into());
+        format!(
+            "✗ Job '{}' failed ({}, {:.1}s)",
+            job.name, code, result.duration_secs
+        )
     };
-    let body = result.response.as_deref()
+    let body = result
+        .response
+        .as_deref()
         .map(|r| {
             // Prefer last "Summary:" line if present, otherwise use last non-empty line
             let trimmed = r.trim();
-            let last_meaningful = trimmed.lines().rev()
+            let last_meaningful = trimmed
+                .lines()
+                .rev()
                 .find(|l| l.starts_with("Summary:"))
                 .or_else(|| trimmed.lines().rev().find(|l| !l.trim().is_empty()))
                 .unwrap_or(trimmed);
@@ -56,15 +76,28 @@ fn format_notification(job: &Job, result: &ExecutionResult) -> (String, String) 
 /// Send a completion/failure notification. Optionally opens an artifact on click.
 pub fn notify(job: &Job, result: &ExecutionResult) {
     let (summary, body) = format_notification(job, result);
-    let open_path = job.open_artifact.as_ref()
+    let open_path = job
+        .open_artifact
+        .as_ref()
         .and_then(|a| job::resolve_artifact(&job.working_dir, a));
-    spawn_notify(&summary, &body, open_path.as_ref().map(|p| p.to_string_lossy().as_ref().to_owned()).as_deref(), Some(&job.working_dir.to_string_lossy()), Some(&job.name));
+    spawn_notify(
+        &summary,
+        &body,
+        open_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().as_ref().to_owned())
+            .as_deref(),
+        Some(&job.working_dir.to_string_lossy()),
+        Some(&job.name),
+    );
 }
 
 /// Send a notification using the daemon's sender if available, otherwise subprocess.
 pub fn send_notification(job: &Job, result: &ExecutionResult, sender: &Option<NotificationSender>) {
     let (summary, body) = format_notification(job, result);
-    let open_path = job.open_artifact.as_ref()
+    let open_path = job
+        .open_artifact
+        .as_ref()
         .and_then(|a| job::resolve_artifact(&job.working_dir, a))
         .or_else(|| {
             if !result.success && result.output_path.exists() {
@@ -83,45 +116,74 @@ pub fn send_notification(job: &Job, result: &ExecutionResult, sender: &Option<No
             job_name: Some(job.name.clone()),
         });
     } else {
-        spawn_notify(&summary, &body, open_path.as_ref().map(|p| p.to_string_lossy().as_ref().to_owned()).as_deref(), Some(&job.working_dir.to_string_lossy()), Some(&job.name));
+        spawn_notify(
+            &summary,
+            &body,
+            open_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().as_ref().to_owned())
+                .as_deref(),
+            Some(&job.working_dir.to_string_lossy()),
+            Some(&job.name),
+        );
     }
 }
 
 /// Send an error/timeout notification for a job.
 pub fn notify_error(job: &Job, error: &str) {
     let summary = format!("✗ Job '{}' error", job.name);
-    spawn_notify(&summary, error, None, Some(&job.working_dir.to_string_lossy()), Some(&job.name));
+    spawn_notify(
+        &summary,
+        error,
+        None,
+        Some(&job.working_dir.to_string_lossy()),
+        Some(&job.name),
+    );
 }
 
 /// Send a start notification for one or more jobs.
 pub fn notify_start(job_names: &[&str]) {
     let (summary, body) = if job_names.len() == 1 {
-        (format!("🚀 Job '{}' starting...", job_names[0]),
-         format!("Run 'boo disable {}' to pause", job_names[0]))
+        (
+            format!("🚀 Job '{}' starting...", job_names[0]),
+            format!("Run 'boo disable {}' to pause", job_names[0]),
+        )
     } else {
-        (format!("🚀 {} jobs starting", job_names.len()),
-         job_names.join(", "))
+        (
+            format!("🚀 {} jobs starting", job_names.len()),
+            job_names.join(", "),
+        )
     };
     spawn_notify(&summary, &body, None, None, None);
 }
 
 /// Spawn the internal-notify child process.
-fn spawn_notify(summary: &str, body: &str, open: Option<&str>, working_dir: Option<&str>, job_name: Option<&str>) {
-    if cfg!(test) || std::env::var_os("BOO_NO_NOTIFY").is_some() { return; }
+fn spawn_notify(
+    summary: &str,
+    body: &str,
+    open: Option<&str>,
+    working_dir: Option<&str>,
+    job_name: Option<&str>,
+) {
+    if cfg!(test) || std::env::var_os("BOO_NO_NOTIFY").is_some() {
+        return;
+    }
 
     // Prefer the .app bundle binary (required for native notifications on macOS)
     let exe = {
         #[cfg(target_os = "macos")]
         {
-            let bundle = dirs::home_dir()
-                .map(|h| h.join("Applications/Boo.app/Contents/MacOS/boo"));
+            let bundle =
+                dirs::home_dir().map(|h| h.join("Applications/Boo.app/Contents/MacOS/boo"));
             match bundle {
                 Some(p) if p.exists() => p,
                 _ => std::env::current_exe().unwrap_or_else(|_| "boo".into()),
             }
         }
         #[cfg(not(target_os = "macos"))]
-        { std::env::current_exe().unwrap_or_else(|_| "boo".into()) }
+        {
+            std::env::current_exe().unwrap_or_else(|_| "boo".into())
+        }
     };
     let mut cmd = std::process::Command::new(exe);
     cmd.args(["internal-notify", summary, body])
@@ -139,8 +201,17 @@ fn spawn_notify(summary: &str, body: &str, open: Option<&str>, working_dir: Opti
 }
 
 /// Called by the hidden `internal-notify` subcommand. Runs on the main thread (required for macOS).
-pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, _working_dir: Option<&str>, job_name: Option<&str>) {
-    use user_notify::{NotificationBuilder, NotificationCategory, NotificationCategoryAction, NotificationResponseAction};
+pub fn send_and_exit(
+    summary: &str,
+    body: &str,
+    open: Option<&str>,
+    _working_dir: Option<&str>,
+    job_name: Option<&str>,
+) {
+    use user_notify::{
+        NotificationBuilder, NotificationCategory, NotificationCategoryAction,
+        NotificationResponseAction,
+    };
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -182,14 +253,12 @@ pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, _working_dir
         }),
         vec![NotificationCategory {
             identifier: "boo-job".into(),
-            actions: vec![
-                NotificationCategoryAction::TextInputAction {
-                    identifier: "reply".into(),
-                    title: "Reply".into(),
-                    input_button_title: "Send".into(),
-                    input_placeholder: "Follow up...".into(),
-                },
-            ],
+            actions: vec![NotificationCategoryAction::TextInputAction {
+                identifier: "reply".into(),
+                title: "Reply".into(),
+                input_button_title: "Send".into(),
+                input_placeholder: "Follow up...".into(),
+            }],
         }],
     );
 
@@ -203,7 +272,9 @@ pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, _working_dir
     });
 
     if sent.is_err() {
-        if let Some(path) = open { open_file(path); }
+        if let Some(path) = open {
+            open_file(path);
+        }
         std::process::exit(0);
     }
 
@@ -212,13 +283,21 @@ pub fn send_and_exit(summary: &str, body: &str, open: Option<&str>, _working_dir
     {
         use std::time::{Duration, Instant};
         extern "C" {
-            fn CFRunLoopRunInMode(mode: *const std::ffi::c_void, seconds: f64, return_after: u8) -> i32;
+            fn CFRunLoopRunInMode(
+                mode: *const std::ffi::c_void,
+                seconds: f64,
+                return_after: u8,
+            ) -> i32;
             static kCFRunLoopDefaultMode: *const std::ffi::c_void;
         }
         let deadline = Instant::now() + Duration::from_secs(120);
         while Instant::now() < deadline {
-            unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, 0); }
-            if rx.try_recv().is_ok() { break; }
+            unsafe {
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, 0);
+            }
+            if rx.try_recv().is_ok() {
+                break;
+            }
         }
     }
 
@@ -236,10 +315,16 @@ pub fn open_terminal_resume(job_name: &str, prompt: Option<&str>, previous: bool
     let boo_bin = std::env::current_exe().unwrap_or_else(|_| "boo".into());
     let boo = boo_bin.to_string_lossy();
 
-    let mut args = format!("'{}' resume '{}'", boo.replace('\'', "'\\''"), job_name.replace('\'', "'\\''"));
-    if previous { args.push_str(" --previous"); }
+    let mut args = format!(
+        "'{}' resume '{}'",
+        boo.replace('\'', "'\\''"),
+        job_name.replace('\'', "'\\''")
+    );
+    if previous {
+        args.push_str(" --previous");
+    }
     if let Some(p) = prompt {
-        args.push_str(&format!(" '{}'", p.replace('\'', "'\\''"))); 
+        args.push_str(&format!(" '{}'", p.replace('\'', "'\\''")));
     }
 
     open_terminal_with_command(&args, &format!("resume-{}", std::process::id()));
@@ -247,15 +332,22 @@ pub fn open_terminal_resume(job_name: &str, prompt: Option<&str>, previous: bool
 
 /// Open a new terminal window and run a fresh interactive kiro-cli session.
 /// Used by `boo run --interactive --new-window` for orchestrator handoffs.
-pub fn open_terminal_run(job_name: &str, agent: Option<&str>, prompt: &str, working_dir: &std::path::Path) {
+pub fn open_terminal_run(
+    job_name: &str,
+    agent: Option<&str>,
+    prompt: &str,
+    working_dir: &std::path::Path,
+) {
     let config = crate::config::Config::load();
     let kiro = &config.kiro_cli_path;
 
-    let mut args = format!("cd '{}' && '{}' chat", 
+    let mut args = format!(
+        "cd '{}' && '{}' chat",
         working_dir.to_string_lossy().replace('\'', "'\\''"),
-        kiro.replace('\'', "'\\''"));
+        kiro.replace('\'', "'\\''")
+    );
     if let Some(a) = agent {
-        args.push_str(&format!(" --agent '{}'", a.replace('\'', "'\\''"))); 
+        args.push_str(&format!(" --agent '{}'", a.replace('\'', "'\\''")));
     }
     args.push_str(&format!(" -- '{}'", prompt.replace('\'', "'\\''")));
 
@@ -282,49 +374,74 @@ fn open_terminal_with_command(args: &str, label: &str) {
             let script = format!(
                 "tell application \"iTerm\"\n\tactivate\n\tset newWindow to (create window with default profile)\n\ttell current session of newWindow\n\t\twrite text \"{escaped}\"\n\tend tell\nend tell"
             );
-            let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
+            let _ = std::process::Command::new("osascript")
+                .args(["-e", &script])
+                .spawn();
         } else if terminal == "Terminal" {
             let escaped = args.replace('\\', "\\\\").replace('"', "\\\"");
             let script = format!(
                 "tell application \"Terminal\"\n\tactivate\n\tdo script \"{escaped}\"\nend tell"
             );
-            let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
+            let _ = std::process::Command::new("osascript")
+                .args(["-e", &script])
+                .spawn();
         } else {
             let tmp = crate::config::boo_dir().join(format!("handoff-{}.command", label));
             let _ = std::fs::write(&tmp, format!("#!/bin/sh\nrm -f \"$0\"\nexec {args}\n"));
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
-            let _ = std::process::Command::new("open").args(["-a", terminal]).arg(&tmp).status();
+            let _ = std::process::Command::new("open")
+                .args(["-a", terminal])
+                .arg(&tmp)
+                .status();
         }
     }
 
     #[cfg(target_os = "linux")]
     {
-        let terminals = [("x-terminal-emulator", vec!["-e"]), ("gnome-terminal", vec!["--"]), ("xterm", vec!["-e"])];
+        let terminals = [
+            ("x-terminal-emulator", vec!["-e"]),
+            ("gnome-terminal", vec!["--"]),
+            ("xterm", vec!["-e"]),
+        ];
         for (term, term_args) in &terminals {
             let mut c = std::process::Command::new(term);
             c.args(term_args).args(["sh", "-c", args]);
-            if c.spawn().is_ok() { return; }
+            if c.spawn().is_ok() {
+                return;
+            }
         }
     }
 
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd").args(["/C", "start", "cmd", "/K", args]).spawn();
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "cmd", "/K", args])
+            .spawn();
     }
 }
 
 /// Open a file with the system default handler.
 pub fn open_file(path: &str) {
     let path = std::path::Path::new(path);
-    if !path.exists() { return; }
+    if !path.exists() {
+        return;
+    }
 
     #[cfg(target_os = "macos")]
-    { let _ = std::process::Command::new("open").arg(path).spawn(); }
+    {
+        let _ = std::process::Command::new("open").arg(path).spawn();
+    }
 
     #[cfg(target_os = "linux")]
-    { let _ = std::process::Command::new("xdg-open").arg(path).spawn(); }
+    {
+        let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+    }
 
     #[cfg(target_os = "windows")]
-    { let _ = std::process::Command::new("cmd").args(["/C", "start", "", &path.to_string_lossy()]).spawn(); }
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path.to_string_lossy()])
+            .spawn();
+    }
 }

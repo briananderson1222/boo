@@ -24,7 +24,9 @@ pub struct MockClock {
 
 impl MockClock {
     pub fn new(start: DateTime<Utc>) -> Self {
-        Self { now: Arc::new(Mutex::new(start)) }
+        Self {
+            now: Arc::new(Mutex::new(start)),
+        }
     }
 
     pub fn advance(&self, duration: chrono::Duration) {
