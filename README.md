@@ -88,6 +88,7 @@ boo add --name "calendar-check" \
 | `boo resume [name\|id]` | Resume an interactive kiro-cli session to follow up |
 | `boo stats [name\|id]` | Show run statistics (24h/7d/30d windows, supports `--format json\|csv\|table`) |
 | `boo edit <name\|id>` | Edit an existing job's settings |
+| `boo wait <name\|id>` | Wait for an active job run to complete |
 | `boo install` | Register as auto-start service (re-run after building new version) |
 | `boo uninstall` | Remove auto-start service |
 
@@ -293,7 +294,7 @@ Optional config at `~/.boo/config.json`:
 ## Development
 
 ```bash
-cargo test              # 71 tests (unit, property-based, CLI integration)
+cargo test              # 75 tests (unit, property-based, CLI integration)
 cargo clippy            # Zero warnings
 cargo build --release   # ~3.5MB binary
 ```

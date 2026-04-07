@@ -10,6 +10,25 @@ pub mod notification_service;
 pub mod scheduler;
 pub mod store;
 
+/// Check if a process with the given PID is alive.
+pub fn is_pid_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    { unsafe { libc::kill(pid as i32, 0) == 0 } }
+
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION};
+        unsafe {
+            if let Ok(handle) = OpenProcess(PROCESS_QUERY_INFORMATION, false, pid) {
+                let _ = CloseHandle(handle);
+                return true;
+            }
+        }
+        false
+    }
+}
+
 /// Strip ANSI escape sequences and BEL characters from text.
 pub fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());

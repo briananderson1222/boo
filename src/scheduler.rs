@@ -124,6 +124,15 @@ impl<C: Clock + 'static> Scheduler<C> {
         tokio::spawn(async move {
             { running_jobs.lock().await.insert(job.id); }
 
+            // Track active run on disk for boo status/wait
+            if let Ok(store) = Self::make_store(&store_dir) {
+                let active = crate::store::ActiveRun {
+                    job_id: job.id, job_name: job.name.clone(),
+                    pid: std::process::id(), started_at: chrono::Utc::now(), manual: false,
+                };
+                let _ = store.write_active_run(&active);
+            }
+
             let result = Self::execute_with_retry(job.clone(), config, store_dir.clone(), clock, sender.clone(), webhook_url.clone()).await;
             if let Err(e) = &result {
                 let retries = job.retry_count;
@@ -165,6 +174,11 @@ impl<C: Clock + 'static> Scheduler<C> {
                         "error": msg,
                     }));
                 }
+            }
+
+            // Clean up active run tracking
+            if let Ok(store) = Self::make_store(&store_dir) {
+                store.remove_active_run(job.id);
             }
 
             { running_jobs.lock().await.remove(&job.id); }

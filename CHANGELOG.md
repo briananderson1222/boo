@@ -7,13 +7,22 @@ All notable changes to this project will be documented in this file.
 ### Features
 - `boo run --interactive --new-window`: open a new terminal window for interactive sessions, enabling orchestrator handoffs
 - Shared `open_terminal_with_command` helper consolidates terminal launch logic for both resume and run
+- Active run tracking: `~/.boo/runs/<job-id>.active` files track in-flight jobs with PID and start time
+- `boo status` now shows active runs with PID, source (manual/daemon), and elapsed time; running jobs marked with ▶
+- `boo wait <job>`: poll until an active run completes, print result, exit 1 on failure
+- `boo status --format json` includes `active_runs`, `running`, `pid`, `running_since` fields
 
 ### Bug Fixes
 - Ensure working directory and log directory exist before job execution
+- Fix iTerm session restoration loop: use AppleScript `write text` for iTerm, `do script` for Terminal.app instead of `.command` files
+- Stale `.active` files auto-cleaned when PID is no longer alive
 - Gitignore backup files
 
+### Code Quality
+- DRY: shared `is_pid_alive` in lib.rs replaces duplicated PID checks in main.rs
+
 ### Docs
-- README: add `edit` and `stats` commands, `--trust-all-tools`/`--trust-tools`/`--runner`/`--description` options, `--follow`/`--interactive`/`--new-window` run flags, `notify_webhook` config, config reference table, editing jobs section
+- README: add `edit`, `stats`, `wait` commands, `--trust-all-tools`/`--trust-tools`/`--runner`/`--description` options, `--follow`/`--interactive`/`--new-window` run flags, `notify_webhook` config, config reference table, editing jobs section
 - AGENTS.md: update command count, notifier.rs description, add terminal handoff design decision
 
 ## [0.4.0] - 2026-03-05

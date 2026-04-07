@@ -1,11 +1,23 @@
 use crate::config;
 use crate::error::{BooError, Result};
+use crate::is_pid_alive;
 use crate::job::{Job, RunRecord};
+use chrono::{DateTime, Utc};
 use fs2::FileExt;
+use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveRun {
+    pub job_id: Uuid,
+    pub job_name: String,
+    pub pid: u32,
+    pub started_at: DateTime<Utc>,
+    pub manual: bool,
+}
 
 pub struct JobStore {
     jobs_path: PathBuf,
@@ -134,6 +146,41 @@ impl JobStore {
         }
         records.reverse();
         Ok(records)
+    }
+
+    pub fn write_active_run(&self, run: &ActiveRun) -> Result<()> {
+        let path = self.runs_dir.join(format!("{}.active", run.job_id));
+        let json = serde_json::to_string(run)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    pub fn remove_active_run(&self, job_id: Uuid) {
+        let path = self.runs_dir.join(format!("{}.active", job_id));
+        let _ = std::fs::remove_file(path);
+    }
+
+    pub fn list_active_runs(&self) -> Vec<ActiveRun> {
+        let Ok(entries) = std::fs::read_dir(&self.runs_dir) else { return Vec::new() };
+        entries.filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "active"))
+            .filter_map(|e| {
+                let content = std::fs::read_to_string(e.path()).ok()?;
+                let run: ActiveRun = serde_json::from_str(&content).ok()?;
+                if is_pid_alive(run.pid) { Some(run) } else {
+                    // Stale .active file — process died without cleanup
+                    let _ = std::fs::remove_file(e.path());
+                    None
+                }
+            })
+            .collect()
+    }
+
+    pub fn get_active_run(&self, job_id: Uuid) -> Option<ActiveRun> {
+        let path = self.runs_dir.join(format!("{}.active", job_id));
+        let content = std::fs::read_to_string(path).ok()?;
+        let run: ActiveRun = serde_json::from_str(&content).ok()?;
+        if is_pid_alive(run.pid) { Some(run) } else { None }
     }
 
     pub fn rotate_logs(&self, job_id: Uuid, max_runs: usize) -> Result<()> {

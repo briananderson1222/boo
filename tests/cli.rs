@@ -176,3 +176,34 @@ fn test_list_format_csv() {
         .assert().success()
         .stdout(predicate::str::contains("csv-test"));
 }
+
+#[test]
+fn test_wait_not_running() {
+    let dir = tempfile::tempdir().unwrap();
+    boo().env("HOME", dir.path())
+        .args(["add", "--name", "wait-test", "--every", "1h", "--prompt", "hello"])
+        .assert().success();
+    boo().env("HOME", dir.path())
+        .args(["wait", "wait-test"])
+        .assert().success()
+        .stdout(predicate::str::contains("not running"));
+}
+
+#[test]
+fn test_wait_help() {
+    boo().args(["wait", "--help"]).assert().success()
+        .stdout(predicate::str::contains("--interval"));
+}
+
+#[test]
+fn test_status_shows_active_runs_section() {
+    // Status should succeed and show daemon info (active runs section only appears when jobs are running)
+    boo().arg("status").assert().success()
+        .stdout(predicate::str::contains("Daemon:"));
+}
+
+#[test]
+fn test_status_json_has_active_runs() {
+    boo().args(["status", "--format", "json"]).assert().success()
+        .stdout(predicate::str::contains("active_runs"));
+}

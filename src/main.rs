@@ -205,6 +205,13 @@ enum Commands {
         #[arg(long)]
         description: Option<String>,
     },
+    /// Wait for an active job run to complete
+    Wait {
+        target: String,
+        /// Poll interval in seconds
+        #[arg(long, default_value = "2")]
+        interval: u64,
+    },
     /// Install boo as auto-start service
     Install,
     /// Remove boo from auto-start
@@ -363,6 +370,7 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
         Commands::Logs { target, count, output, format } => cmd_logs(&target, count, output, &format),
         Commands::Resume { target, prompt, previous } => cmd_resume(target.as_deref(), prompt.as_deref(), previous),
         Commands::Stats { target, format } => cmd_stats(target.as_deref(), &format),
+        Commands::Wait { target, interval } => cmd_wait(&target, interval).await,
         Commands::Install => cmd_install(),
         Commands::Uninstall => cmd_uninstall(),
         Commands::_Notify { .. } => unreachable!("handled before tokio runtime"),
@@ -447,8 +455,16 @@ async fn cmd_run(target: &str, no_notify: bool, follow: bool, interactive: bool,
     let now = Utc::now();
     let log_path = log_dir.join(format!("manual_{}_{:03}.log", now.format("%Y%m%d_%H%M%S"), now.timestamp_subsec_millis()));
 
+    // Track active run
+    let active = boo::store::ActiveRun {
+        job_id: job.id, job_name: job.name.clone(),
+        pid: process::id(), started_at: now, manual: true,
+    };
+    let _ = store.write_active_run(&active);
+
     match executor::execute_job(&job, &config, &log_path).await {
         Ok(result) => {
+            store.remove_active_run(job.id);
             let record = boo::job::RunRecord {
                 job_id: job.id, job_name: job.name.clone(), fired_at: now, scheduled_for: now,
                 missed_count: 0, duration_secs: result.duration_secs, exit_code: result.exit_code,
@@ -481,6 +497,7 @@ async fn cmd_run(target: &str, no_notify: bool, follow: bool, interactive: bool,
             Ok(())
         }
         Err(e) => {
+            store.remove_active_run(job.id);
             if !no_notify { notifier::notify_error(&job, &e.to_string()); }
             if let Some(ref url) = config.notify_webhook {
                 notifier::notify_webhook(url, serde_json::json!({
@@ -766,20 +783,26 @@ fn cmd_status(format: &str) -> boo::error::Result<()> {
 
     let store = JobStore::new()?;
     let jobs: Vec<_> = store.load_jobs()?.into_iter().filter(|j| j.enabled).collect();
+    let active_runs = store.list_active_runs();
     let now = Utc::now();
 
     if format == "json" {
         let next_fires: Vec<_> = jobs.iter().map(|job| {
+            let active = active_runs.iter().find(|r| r.job_id == job.id);
             serde_json::json!({
                 "name": job.name,
                 "id": job.id.to_string(),
                 "schedule": job.schedule_display(),
                 "next_fire": cron_eval::next_fire_time(job, now).map(|t| t.to_rfc3339()),
+                "running": active.is_some(),
+                "pid": active.map(|a| a.pid),
+                "running_since": active.map(|a| a.started_at.to_rfc3339()),
             })
         }).collect();
         let obj = serde_json::json!({
             "daemon_running": running,
             "enabled_jobs": jobs.len(),
+            "active_runs": active_runs.len(),
             "jobs": next_fires,
         });
         println!("{}", serde_json::to_string_pretty(&obj).unwrap());
@@ -787,15 +810,27 @@ fn cmd_status(format: &str) -> boo::error::Result<()> {
     }
 
     println!("Daemon: {}", if running { "running" } else { "stopped" });
+
+    if !active_runs.is_empty() {
+        println!("\nActive runs:");
+        for run in &active_runs {
+            let elapsed = (now - run.started_at).num_seconds();
+            let source = if run.manual { "manual" } else { "daemon" };
+            println!("  {} - pid {} ({source}, {elapsed}s elapsed)", run.job_name, run.pid);
+        }
+    }
+
     if jobs.is_empty() {
         println!("No enabled jobs");
         return Ok(());
     }
     println!("\nNext fire times:");
     for job in jobs {
+        let active = active_runs.iter().any(|r| r.job_id == job.id);
+        let prefix = if active { "▶ " } else { "  " };
         match cron_eval::next_fire_time(&job, now) {
-            Some(next) => println!("  {} - {} ({})", job.name, next.format("%Y-%m-%d %H:%M:%S UTC"), job.schedule_display()),
-            None => println!("  {} - done", job.name),
+            Some(next) => println!("{prefix}{} - {} ({})", job.name, next.format("%Y-%m-%d %H:%M:%S UTC"), job.schedule_display()),
+            None => println!("{prefix}{} - done", job.name),
         }
     }
     Ok(())
@@ -899,6 +934,46 @@ fn cmd_resume(target: Option<&str>, prompt: Option<&str>, previous: bool) -> boo
         (boo::config::boo_dir().join("workspace"), None)
     };
     launch_interactive_session(&dir, agent.as_deref(), prompt, Some(previous))
+}
+
+async fn cmd_wait(target: &str, interval: u64) -> boo::error::Result<()> {
+    let store = JobStore::new()?;
+    let job = resolve_job(&store, target)?;
+
+    // Check if currently running
+    let active = store.get_active_run(job.id);
+    if active.is_none() {
+        // Not running — show last run result
+        let records = store.load_run_records(job.id, 1)?;
+        if let Some(last) = records.last() {
+            println!("Job '{}' is not running. Last run: success={}, duration={:.2}s ({})",
+                job.name, last.success, last.duration_secs, last.fired_at.format("%Y-%m-%d %H:%M:%S UTC"));
+        } else {
+            println!("Job '{}' is not running and has no run history.", job.name);
+        }
+        return Ok(());
+    }
+
+    let active = active.unwrap();
+    println!("Waiting for '{}' (pid {})...", job.name, active.pid);
+
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+        if store.get_active_run(job.id).is_none() {
+            break;
+        }
+    }
+
+    // Show result
+    let records = store.load_run_records(job.id, 1)?;
+    if let Some(last) = records.last() {
+        let status = if last.success { "✓ succeeded" } else { "✗ failed" };
+        println!("Job '{}' {status} in {:.2}s", job.name, last.duration_secs);
+        if !last.success { std::process::exit(1); }
+    } else {
+        println!("Job '{}' finished (no run record found).", job.name);
+    }
+    Ok(())
 }
 
 fn cmd_install() -> boo::error::Result<()> {
@@ -1165,22 +1240,7 @@ fn is_daemon_running(pid_path: &std::path::Path) -> bool {
     // Primary: check PID file
     if let Ok(pid_str) = std::fs::read_to_string(pid_path) {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
-            #[cfg(unix)]
-            { if unsafe { libc::kill(pid as i32, 0) == 0 } { return true; } }
-
-            #[cfg(windows)]
-            {
-                use windows::Win32::Foundation::CloseHandle;
-                use windows::Win32::System::Threading::{
-                    OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_SYNCHRONIZE,
-                };
-                unsafe {
-                    if let Ok(handle) = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SYNCHRONIZE, false, pid) {
-                        let _ = CloseHandle(handle);
-                        return true;
-                    }
-                }
-            }
+            if boo::is_pid_alive(pid) { return true; }
         }
     }
 
