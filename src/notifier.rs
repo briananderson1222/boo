@@ -274,11 +274,12 @@ fn open_terminal_with_command(args: &str, label: &str) {
             }
             "Terminal"
         });
-        // iTerm and Terminal.app use AppleScript to avoid .command file session restoration loops
+        // iTerm and Terminal.app use AppleScript to avoid .command file session restoration loops.
+        // Use "write text" so the session is a normal shell — iTerm won't re-run the command on restart.
         if terminal == "iTerm" {
             let escaped = args.replace('\\', "\\\\").replace('"', "\\\"");
             let script = format!(
-                "tell application \"iTerm\"\n\tactivate\n\tcreate window with default profile command \"{escaped}\"\nend tell"
+                "tell application \"iTerm\"\n\tactivate\n\tset newWindow to (create window with default profile)\n\ttell current session of newWindow\n\t\twrite text \"{escaped}\"\n\tend tell\nend tell"
             );
             let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
         } else if terminal == "Terminal" {

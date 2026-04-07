@@ -160,15 +160,9 @@ fn test_list_format_json() {
 
 #[test]
 fn test_run_new_window_flag_accepted() {
-    let dir = tempfile::tempdir().unwrap();
-    boo().env("HOME", dir.path())
-        .args(["add", "--name", "nw-test", "--every", "1h", "--prompt", "hello"])
-        .assert().success();
-    // --new-window requires --interactive; verify the flags parse without error
-    // (actual terminal launch won't work in CI, but arg validation does)
-    let _ = boo().env("HOME", dir.path())
-        .args(["run", "nw-test", "--interactive", "--new-window"])
-        .assert();
+    // Verify --new-window is a valid flag without actually opening a terminal
+    boo().args(["run", "--help"]).assert().success()
+        .stdout(predicate::str::contains("--new-window"));
 }
 
 #[test]

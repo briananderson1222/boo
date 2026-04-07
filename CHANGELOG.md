@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-04-07
+
+### Features
+- `boo run --interactive --new-window`: open a new terminal window for interactive sessions, enabling orchestrator handoffs
+- Shared `open_terminal_with_command` helper consolidates terminal launch logic for both resume and run
+
+### Bug Fixes
+- Ensure working directory and log directory exist before job execution
+- Gitignore backup files
+
+### Docs
+- README: add `edit` and `stats` commands, `--trust-all-tools`/`--trust-tools`/`--runner`/`--description` options, `--follow`/`--interactive`/`--new-window` run flags, `notify_webhook` config, config reference table, editing jobs section
+- AGENTS.md: update command count, notifier.rs description, add terminal handoff design decision
+
 ## [0.4.0] - 2026-03-05
 
 ### Bug Fixes

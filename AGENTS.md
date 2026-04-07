@@ -16,7 +16,7 @@ Cross-platform Rust scheduler daemon that fires kiro-cli prompts on cron/at/ever
 
 ```
 src/
-├── main.rs           # CLI entry point (clap) — 13 user commands + hidden internal-notify
+├── main.rs           # CLI entry point (clap) — 15 user commands + hidden internal-notify
 ├── scheduler.rs      # Heartbeat loop, job spawning, retry loop, delete-after-run, notification integration
 ├── store.rs          # Atomic JSON persistence with file locking (single lock scope per mutation)
 ├── executor.rs       # Runner trait (KiroRunner, ShellRunner), subprocess spawning, stdin piping, timeout + kill
@@ -24,7 +24,7 @@ src/
 ├── job.rs            # Job + RunRecord models with schedule types, runner/command, retry/notification fields
 ├── config.rs         # Global config (~/.boo/config.json), warns on malformed config
 ├── clock.rs          # Clock trait with Clone bound (SystemClock + MockClock for testing)
-├── notifier.rs       # Notification formatting, subprocess fallback for boo run, open_file/open_terminal_resume
+├── notifier.rs       # Notification formatting, subprocess fallback for boo run, open_file/open_terminal_resume/open_terminal_run
 ├── notification_service.rs  # Daemon notification thread: CFRunLoop + user-notify manager, click/reply callbacks
 ├── installer.rs      # Platform-specific auto-start (launchd/systemd/Windows), .app bundles, URL scheme
 ├── error.rs          # Error types
@@ -58,6 +58,7 @@ tests/
 - **Duplicate job name prevention**: `boo add` rejects duplicates
 - **Working directory validation**: `boo add` verifies dir exists
 - **PID alive check**: `kill(pid, 0)` on Unix
+- **Terminal handoff**: `boo run --interactive --new-window` opens a new terminal window via `open_terminal_run`, shared `open_terminal_with_command` helper used by both resume and run
 - **Reserved fields**: `Job.timezone` (stored, not yet used by cron_eval — always UTC) and `Job.allow_overlap` (checked by scheduler, but no CLI flag to enable)
 
 ## Testing Strategy

@@ -79,10 +79,15 @@ boo add --name "calendar-check" \
 | `boo enable/disable <name\|id>` | Toggle a job |
 | `boo status` | Show daemon status and upcoming fires |
 | `boo run <name\|id>` | Fire a job immediately (with notifications, use `--no-notify` to suppress) |
+| `boo run --follow` | Print only response content for programmatic use |
+| `boo run --interactive` | Launch foreground kiro-cli session for a job |
+| `boo run --interactive --new-window` | Open a new terminal window for the session |
 | `boo next "<cron>"` | Preview next N occurrences of a cron expression |
 | `boo logs <name\|id>` | Show run history |
 | `boo logs <name\|id> --output` | Print the clean response from the most recent run |
 | `boo resume [name\|id]` | Resume an interactive kiro-cli session to follow up |
+| `boo stats [name\|id]` | Show run statistics (24h/7d/30d windows, supports `--format json\|csv\|table`) |
+| `boo edit <name\|id>` | Edit an existing job's settings |
 | `boo install` | Register as auto-start service (re-run after building new version) |
 | `boo uninstall` | Remove auto-start service |
 
@@ -104,6 +109,10 @@ boo add --name "calendar-check" \
 | `--delete-after-run` | Auto-delete job after success | false |
 | `--open-artifact` | File/glob to open on notification click (relative to dir) | `.response` file |
 | `--notify-start` | Send notification when job starts | false |
+| `--trust-all-tools` | Pass `--trust-all-tools` to kiro-cli | false |
+| `--trust-tools` | Trust only these tools (comma-separated) | — |
+| `--runner` | Runner type: `kiro` (default), `shell` | `kiro` |
+| `--description` | Human-readable description of what this job does | — |
 
 ### Cron Expressions
 
@@ -197,6 +206,16 @@ boo://open/good-morning                               # Open latest artifact
 
 On macOS, a small Swift helper (BooURL.app) is compiled at install time to handle URL events. Requires Xcode Command Line Tools.
 
+### Editing Jobs
+
+Modify any setting on an existing job without remove/re-add:
+
+```bash
+boo edit my-job --timeout 600 --retry 5
+boo edit my-job --cron "0 8 * * 1-5"     # Change schedule
+boo edit my-job --description "Daily standup prep"
+```
+
 ### Removing Jobs
 
 ```bash
@@ -231,9 +250,19 @@ Optional config at `~/.boo/config.json`:
   "default_timeout_secs": 300,
   "max_log_runs": 50,
   "heartbeat_secs": 60,
-  "terminal": "iTerm"
+  "terminal": "iTerm",
+  "notify_webhook": "https://hooks.example.com/boo"
 }
 ```
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `kiro_cli_path` | Path to kiro-cli binary | `kiro-cli` (from PATH) |
+| `default_timeout_secs` | Default job timeout | 300 |
+| `max_log_runs` | Max log files kept per job | 50 |
+| `heartbeat_secs` | Daemon tick interval | 60 |
+| `terminal` | Preferred terminal for resume/new-window | auto-detect |
+| `notify_webhook` | URL for fire-and-forget HTTP POST on job lifecycle events | — |
 
 ## Cross-Platform Support
 
@@ -264,7 +293,7 @@ Optional config at `~/.boo/config.json`:
 ## Development
 
 ```bash
-cargo test              # 70 tests (unit, property-based, CLI integration)
+cargo test              # 71 tests (unit, property-based, CLI integration)
 cargo clippy            # Zero warnings
 cargo build --release   # ~3.5MB binary
 ```
