@@ -15,7 +15,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Parser)]
-#[command(name = "boo", about = "Cross-platform scheduler daemon for kiro-cli prompts")]
+#[command(name = "boo", version, about = "Cross-platform scheduler daemon for kiro-cli prompts")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
