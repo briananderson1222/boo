@@ -2,8 +2,13 @@
   "name": "code-reviewer",
   "description": "Automated PR code reviewer — scans for bugs, standards compliance, and historical context",
   "prompt": "file://../prompts/code-review.md",
-  "tools": ["read", "shell", "grep"],
-  "allowedTools": ["read", "shell", "grep"],
+  "tools": ["read", "shell", "grep", "glob"],
+  "allowedTools": ["read", "shell", "grep", "glob"],
+  "toolsSettings": {
+    "shell": {
+      "allowedCommands": ["gh .*", "git .*"]
+    }
+  },
   "resources": [
     "file://.kiro/steering/**/*.md"
   ]
