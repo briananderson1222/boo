@@ -28,3 +28,13 @@ jobs:
         run: |
           kiro-cli --agent code-reviewer chat --no-interactive \
             "Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}"
+
+      - name: Verify review was posted
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMENTS=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq '[.comments[] | select(.body | contains("Generated with [Kiro CLI]"))] | length')
+          if [ "$COMMENTS" -eq 0 ]; then
+            echo "::error::Kiro code review did not post a comment. Review may have failed silently."
+            exit 1
+          fi
