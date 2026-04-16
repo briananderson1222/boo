@@ -2,10 +2,10 @@
   "name": "code-reviewer",
   "description": "Automated PR code reviewer — scans for bugs, standards compliance, and historical context",
   "prompt": "file://../prompts/code-review.md",
-  "tools": ["read", "shell", "grep", "glob"],
-  "allowedTools": ["read", "shell", "grep", "glob"],
+  "tools": ["fs_read", "execute_bash", "grep", "glob"],
+  "allowedTools": ["fs_read", "execute_bash", "grep", "glob"],
   "toolsSettings": {
-    "shell": {
+    "execute_bash": {
       "allowedCommands": ["gh .*", "git .*", "cd .* && gh .*", "cd .* && git .*", "cd .* ; gh .*", "cd .* ; git .*"]
     }
   },
