@@ -24,14 +24,11 @@ jobs:
       - name: Run Kiro code review
         env:
           KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           kiro-cli --agent code-reviewer chat --no-interactive \
             "Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}"
 
       - name: Verify review was posted
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           COMMENTS=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq '[.comments[] | select(.body | contains("Generated with [Kiro CLI]"))] | length')
           if [ "$COMMENTS" -eq 0 ]; then
