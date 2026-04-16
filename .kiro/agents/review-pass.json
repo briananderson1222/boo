@@ -11,8 +11,7 @@
         "gh pr view",
         "git log",
         "git blame",
-        "git diff",
-        "cat"
+        "git diff"
       ]
     }
   },

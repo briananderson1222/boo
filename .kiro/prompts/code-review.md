@@ -6,6 +6,31 @@ You will receive one of:
 
 Project standards (CLAUDE.md, AGENTS.md, CONTRIBUTING.md, steering files) are already loaded in your context if they exist.
 
+## Output
+
+After completing the review, write a JSON file to `.kiro/reviews/<timestamp>.json` (use ISO 8601 date as the filename, e.g. `2026-04-16T22-15-00Z.json`). The file must contain:
+
+```json
+{
+  "mode": "pr" | "local",
+  "ref": "<PR number or branch name>",
+  "repo": "<owner/repo if PR mode>",
+  "sha": "<full commit SHA>",
+  "issues_found": <number of issues after filtering>,
+  "issues": [
+    {
+      "file": "<path>",
+      "line": "<start>-<end>",
+      "description": "<brief description>",
+      "source": "<e.g. standards, bug, git-history, code-comment>",
+      "score": <0-100>
+    }
+  ]
+}
+```
+
+Create the `.kiro/reviews/` directory if it doesn't exist.
+
 ## Step 1: Get the Diff
 
 **PR mode:**

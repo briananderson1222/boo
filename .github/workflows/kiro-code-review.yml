@@ -28,3 +28,18 @@ jobs:
         run: |
           kiro-cli chat --agent code-reviewer --no-interactive \
             "Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}"
+
+      - name: Check review results
+        run: |
+          REVIEW=$(ls -t .kiro/reviews/*.json 2>/dev/null | head -1)
+          if [ -z "$REVIEW" ]; then
+            echo "::error::No review output found in .kiro/reviews/"
+            exit 1
+          fi
+          ISSUES=$(jq '.issues_found' "$REVIEW")
+          echo "Review: $REVIEW"
+          echo "Issues found: $ISSUES"
+          jq '.' "$REVIEW"
+          if [ "$ISSUES" -gt 0 ]; then
+            exit 1
+          fi

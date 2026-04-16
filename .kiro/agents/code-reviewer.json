@@ -2,9 +2,12 @@
   "name": "code-reviewer",
   "description": "Automated PR code reviewer — orchestrates parallel review passes with subagents",
   "prompt": "file://../prompts/code-review.md",
-  "tools": ["read", "shell", "grep", "glob", "subagent"],
-  "allowedTools": ["read", "shell", "grep", "glob", "subagent"],
+  "tools": ["read", "write", "shell", "grep", "glob", "subagent"],
+  "allowedTools": ["read", "write", "shell", "grep", "glob", "subagent"],
   "toolsSettings": {
+    "write": {
+      "allowedPaths": [".kiro/reviews/**"]
+    },
     "shell": {
       "allowedCommands": [
         "gh pr view",
@@ -16,8 +19,7 @@
         "git rev-parse",
         "git diff",
         "git merge-base",
-        "git branch",
-        "cat"
+        "git branch"
       ]
     },
     "subagent": {
