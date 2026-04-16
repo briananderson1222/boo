@@ -26,7 +26,7 @@ jobs:
           KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          kiro-cli --agent code-reviewer chat --no-interactive \
+          kiro-cli --agent code-reviewer chat --no-interactive --trust-all-tools \
             "Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}"
 
       - name: Verify review was posted
