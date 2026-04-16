@@ -23,6 +23,7 @@
   "resources": [
     "file://.kiro/steering/**/*.md",
     "file://AGENTS.md",
-    "file://CLAUDE.md"
+    "file://CLAUDE.md",
+    "file://CONTRIBUTING.md"
   ]
 }
