@@ -15,7 +15,7 @@ If any apply, post a brief comment explaining why you're skipping review, then s
 ## Step 2: Gather Project Standards
 
 Search the repository root and modified directories for any of these files:
-- `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `.kiro/settings.json`
+- `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `.kiro/steering/*.md`
 
 Read any that exist. These contain project-specific coding standards that the review must check against.
 

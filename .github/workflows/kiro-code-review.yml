@@ -26,7 +26,5 @@ jobs:
           KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          sed -e 's/{{PR_NUMBER}}/${{ github.event.pull_request.number }}/g' \
-              -e 's|{{REPO}}|${{ github.repository }}|g' \
-              .kiro/prompts/code-review.md \
-          | kiro-cli chat --no-interactive --trust-all-tools "Follow the code review instructions below."
+          kiro-cli chat --no-interactive --trust-all-tools \
+            "Read .kiro/prompts/code-review.md and follow its instructions. Replace {{PR_NUMBER}} with ${{ github.event.pull_request.number }} and {{REPO}} with ${{ github.repository }}."
