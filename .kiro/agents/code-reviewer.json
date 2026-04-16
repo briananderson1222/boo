@@ -1,9 +1,9 @@
 {
   "name": "code-reviewer",
-  "description": "Automated PR code reviewer — scans for bugs, standards compliance, and historical context",
+  "description": "Automated PR code reviewer — orchestrates parallel review passes with subagents",
   "prompt": "file://../prompts/code-review.md",
-  "tools": ["read", "shell", "grep", "glob"],
-  "allowedTools": ["read", "shell", "grep", "glob"],
+  "tools": ["read", "shell", "grep", "glob", "subagent"],
+  "allowedTools": ["read", "shell", "grep", "glob", "subagent"],
   "toolsSettings": {
     "shell": {
       "allowedCommands": [
@@ -15,15 +15,20 @@
         "git blame",
         "git rev-parse",
         "git diff",
+        "git merge-base",
         "git branch",
         "cat"
       ]
+    },
+    "subagent": {
+      "availableAgents": ["review-pass", "review-scorer"],
+      "trustedAgents": ["review-pass", "review-scorer"]
     }
   },
   "resources": [
-    "file://.kiro/steering/**/*.md",
-    "file://AGENTS.md",
     "file://CLAUDE.md",
-    "file://CONTRIBUTING.md"
+    "file://AGENTS.md",
+    "file://CONTRIBUTING.md",
+    "file://.kiro/steering/**/*.md"
   ]
 }
