@@ -1,0 +1,10 @@
+{
+  "name": "code-reviewer",
+  "description": "Automated PR code reviewer — scans for bugs, standards compliance, and historical context",
+  "prompt": "file://../prompts/code-review.md",
+  "tools": ["read", "shell", "grep"],
+  "allowedTools": ["read", "shell", "grep"],
+  "resources": [
+    "file://.kiro/steering/**/*.md"
+  ]
+}
