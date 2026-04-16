@@ -36,7 +36,10 @@ jobs:
             echo "::error::No review output found in .kiro/reviews/"
             exit 1
           fi
-          ISSUES=$(jq '.issues_found' "$REVIEW")
+          ISSUES=$(jq -e '.issues_found // empty' "$REVIEW") || {
+            echo "::error::Review JSON missing or invalid 'issues_found' field"
+            exit 1
+          }
           echo "Review: $REVIEW"
           echo "Issues found: $ISSUES"
           jq '.' "$REVIEW"
