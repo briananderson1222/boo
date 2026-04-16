@@ -3,10 +3,10 @@
   "description": "Automated PR code reviewer — scans for bugs, standards compliance, and historical context",
   "prompt": "file://../prompts/code-review.md",
   "tools": ["read", "shell", "grep", "glob"],
-  "allowedTools": ["read", "fs_read", "shell", "execute_bash", "grep", "glob"],
+  "allowedTools": ["read", "shell", "grep", "glob"],
   "toolsSettings": {
     "shell": {
-      "allowedCommands": ["gh .*", "git .*"]
+      "allowedCommands": ["gh .*", "git .*", "cd .* && gh .*", "cd .* && git .*", "cd .* ; gh .*", "cd .* ; git .*"]
     }
   },
   "resources": [
