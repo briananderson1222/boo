@@ -1,5 +1,4 @@
 /target
-Cargo.lock
 .kiro/cli_todos/
 .kiro/reviews/
 *-backup.json
