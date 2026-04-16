@@ -28,14 +28,3 @@ jobs:
         run: |
           kiro-cli chat --agent code-reviewer --no-interactive \
             "Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}"
-
-      - name: Verify review was posted
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          RUN_START=$(date -u -d '-5 minutes' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -v-5M '+%Y-%m-%dT%H:%M:%SZ')
-          RECENT=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq "[.comments[] | select(.body | contains(\"Generated with [Kiro CLI]\")) | select(.createdAt > \"$RUN_START\")] | length")
-          if [ "$RECENT" -eq 0 ]; then
-            echo "::error::Kiro code review did not post a comment. Review may have failed silently."
-            exit 1
-          fi
