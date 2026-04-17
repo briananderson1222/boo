@@ -50,6 +50,12 @@ done
 
 [[ ${#COMPONENTS[@]} -eq 0 ]] && COMPONENTS=("all")
 
+# Auto-detect git repo root when no explicit --dir
+if [ "$TARGET_DIR" = "." ]; then
+  ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
+  [ -n "$ROOT" ] && TARGET_DIR="$ROOT"
+fi
+
 TARGET_DIR=$(cd "$TARGET_DIR" && pwd)
 echo "Installing to: $TARGET_DIR"
 
