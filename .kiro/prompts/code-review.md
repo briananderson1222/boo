@@ -55,7 +55,7 @@ Write a JSON file to `.kiro/reviews/<timestamp>.json` (ISO 8601 filename). Creat
 
 ## Step 2: Parallel Review
 
-Use the `subagent` tool to spawn `review-pass` agents in parallel. Provide each with the full diff, the list of changed files, and any project standards from your context.
+Use the `subagent` tool to spawn `review-pass` agents in parallel. You SHOULD delegate review passes to subagents rather than performing them inline. Only fall back to inline review if the subagent tool is unavailable or fails. Provide each with the full diff, the list of changed files, and any project standards from your context.
 
 Run passes A through E as defined in the review criteria. Each pass returns a JSON array of issues with severity and confidence.
 
