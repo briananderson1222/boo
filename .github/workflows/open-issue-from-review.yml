@@ -1,0 +1,73 @@
+name: Open Issue from Review
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  open-issue:
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/open-issue')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Parse and create issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          FINDING_NUM=$(echo "$COMMENT_BODY" | grep -oP '(?<=/open-issue\s)\d+' | head -1)
+          if [ -z "$FINDING_NUM" ]; then
+            gh pr comment "$PR_NUMBER" --body "❌ Usage: \`/open-issue <number>\` where number matches a finding from the review."
+            exit 0
+          fi
+
+          # Find the most recent review JSON
+          REVIEW=$(ls -t .kiro/reviews/*.json 2>/dev/null | head -1)
+          if [ -z "$REVIEW" ]; then
+            gh pr comment "$PR_NUMBER" --body "❌ No review JSON found in \`.kiro/reviews/\`."
+            exit 0
+          fi
+
+          # Extract the finding by index (1-based)
+          FINDING=$(jq --argjson n "$FINDING_NUM" '.issues[$n - 1] // empty' "$REVIEW")
+          if [ -z "$FINDING" ]; then
+            TOTAL=$(jq '.issues | length' "$REVIEW")
+            gh pr comment "$PR_NUMBER" --body "❌ Finding #$FINDING_NUM not found. The last review has $TOTAL finding(s)."
+            exit 0
+          fi
+
+          FILE=$(echo "$FINDING" | jq -r '.file')
+          LINE=$(echo "$FINDING" | jq -r '.line')
+          DESC=$(echo "$FINDING" | jq -r '.description')
+          SEVERITY=$(echo "$FINDING" | jq -r '.severity')
+          CONFIDENCE=$(echo "$FINDING" | jq -r '.confidence')
+          SOURCE=$(echo "$FINDING" | jq -r '.source')
+
+          ISSUE_URL=$(gh issue create \
+            --title "Code review: $DESC" \
+            --body "Found during review of PR #$PR_NUMBER.
+
+          **Severity:** $SEVERITY
+          **Confidence:** $CONFIDENCE
+          **File:** \`$FILE#L$LINE\`
+          **Source:** $SOURCE
+
+          $DESC
+
+          ---
+          *Auto-created from [code review](https://github.com/$REPO/pull/$PR_NUMBER).*" \
+            --label "code-review")
+
+          ISSUE_NUM=$(echo "$ISSUE_URL" | grep -oP '\d+$')
+          gh pr comment "$PR_NUMBER" --body "✅ Created issue #$ISSUE_NUM for finding #$FINDING_NUM."
