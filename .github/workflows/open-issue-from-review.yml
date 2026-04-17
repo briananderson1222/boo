@@ -66,7 +66,9 @@ jobs:
           EXISTING=$(gh issue list --repo "$REPO" --label "code-review" --state open \
             --search "Code review: ${SHORT_DESC}" --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "ℹ️ Finding #$FINDING_NUM already tracked in issue #$EXISTING."
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "> **[${SEVERITY}]** ${SHORT_DESC}...
+
+          ℹ️ Finding #$FINDING_NUM already tracked in issue #$EXISTING."
             exit 0
           fi
 
