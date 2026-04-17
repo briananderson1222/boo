@@ -1,0 +1,71 @@
+name: Open Issue from Review
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  open-issue:
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/open-issue')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Parse and create issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          FINDING_NUM=$(echo "$COMMENT_BODY" | grep -oP '(?<=/open-issue\s)\d+' | head -1)
+          if [ -z "$FINDING_NUM" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "❌ Usage: \`/open-issue <number>\` where number matches a finding from the review."
+            exit 0
+          fi
+
+          # Find the review comment containing REVIEW_DATA
+          REVIEW_JSON=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json reviews \
+            --jq '[.reviews[].body | select(contains("REVIEW_DATA"))] | last' \
+            | grep -oP '(?<=<!-- REVIEW_DATA: ).*(?= -->)' || true)
+
+          if [ -z "$REVIEW_JSON" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "❌ No review data found. The review comment may be missing the embedded findings."
+            exit 0
+          fi
+
+          FINDING=$(echo "$REVIEW_JSON" | jq --argjson n "$FINDING_NUM" '.[$n - 1] // empty')
+          if [ -z "$FINDING" ]; then
+            TOTAL=$(echo "$REVIEW_JSON" | jq 'length')
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "❌ Finding #$FINDING_NUM not found. The last review has $TOTAL finding(s)."
+            exit 0
+          fi
+
+          FILE=$(echo "$FINDING" | jq -r '.file')
+          LINE=$(echo "$FINDING" | jq -r '.line')
+          DESC=$(echo "$FINDING" | jq -r '.description')
+          SEVERITY=$(echo "$FINDING" | jq -r '.severity')
+          CONFIDENCE=$(echo "$FINDING" | jq -r '.confidence')
+          SOURCE=$(echo "$FINDING" | jq -r '.source')
+
+          ISSUE_URL=$(gh issue create --repo "$REPO" \
+            --title "Code review: ${DESC:0:80}" \
+            --body "Found during review of PR #$PR_NUMBER.
+
+          **Severity:** $SEVERITY
+          **Confidence:** $CONFIDENCE
+          **File:** \`$FILE#L$LINE\`
+          **Source:** $SOURCE
+
+          $DESC
+
+          ---
+          *Auto-created from [code review](https://github.com/$REPO/pull/$PR_NUMBER).*" \
+            --label "code-review")
+
+          ISSUE_NUM=$(echo "$ISSUE_URL" | grep -oP '\d+$')
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "✅ Created issue #$ISSUE_NUM for finding #$FINDING_NUM."
