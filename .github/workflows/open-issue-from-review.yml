@@ -28,10 +28,19 @@ jobs:
             exit 0
           fi
 
-          # Find the review comment containing REVIEW_DATA
-          REVIEW_JSON=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json reviews \
-            --jq '[.reviews[].body | select(contains("REVIEW_DATA"))] | last' \
+          # Find the most recent review containing REVIEW_DATA that was posted
+          # BEFORE this /open-issue comment (so it references the right review)
+          COMMENT_ID=${{ github.event.comment.id }}
+          REVIEW_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
+            --jq "[.[] | select(.body | contains(\"REVIEW_DATA\")) | {id: .id, body: .body}] | sort_by(.id) | map(select(.id < $COMMENT_ID)) | last | .body" \
             | grep -oP '(?<=<!-- REVIEW_DATA: ).*(?= -->)' || true)
+
+          # Fallback: if no review found before this comment, try the latest one
+          if [ -z "$REVIEW_JSON" ]; then
+            REVIEW_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
+              --jq '[.[] | select(.body | contains("REVIEW_DATA"))] | last | .body' \
+              | grep -oP '(?<=<!-- REVIEW_DATA: ).*(?= -->)' || true)
+          fi
 
           if [ -z "$REVIEW_JSON" ]; then
             gh pr comment "$PR_NUMBER" --repo "$REPO" --body "❌ No review data found. The review comment may be missing the embedded findings."
