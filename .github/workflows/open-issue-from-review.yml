@@ -28,11 +28,10 @@ jobs:
             exit 0
           fi
 
-          # Find the most recent review containing REVIEW_DATA that was posted
-          # BEFORE this /open-issue comment (so it references the right review)
-          COMMENT_ID=${{ github.event.comment.id }}
+          # Find the most recent review containing REVIEW_DATA posted before this comment
+          COMMENT_CREATED="${{ github.event.comment.created_at }}"
           REVIEW_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq "[.[] | select(.body | contains(\"REVIEW_DATA\")) | {id: .id, body: .body}] | sort_by(.id) | map(select(.id < $COMMENT_ID)) | last | .body" \
+            --jq "[.[] | select(.body | contains(\"REVIEW_DATA\")) | select(.submitted_at < \"$COMMENT_CREATED\")] | last | .body" \
             | grep -oP '(?<=<!-- REVIEW_DATA: ).*(?= -->)' || true)
 
           # Fallback: if no review found before this comment, try the latest one

@@ -47,8 +47,8 @@ jobs:
             exit 1
           fi
 
-          ISSUES=$(jq '.issues_found // 0' "$REVIEW")
-          HAS_BLOCKERS=$(jq '[(.issues // [])[] | select(.severity == "CRITICAL" or .severity == "HIGH") | select(.confidence >= 70)] | length > 0' "$REVIEW")
+          ISSUES=$(jq '.issues_found // 0' "$REVIEW" 2>/dev/null || echo 0)
+          HAS_BLOCKERS=$(jq '[(.issues // [])[] | select(.severity == "CRITICAL" or .severity == "HIGH") | select(.confidence >= 70)] | length > 0' "$REVIEW" 2>/dev/null || echo false)
 
           echo "Issues found: $ISSUES"
           echo "Has blockers: $HAS_BLOCKERS"

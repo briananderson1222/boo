@@ -160,24 +160,4 @@ Output the same format to the terminal (use `<file>#L<start>-L<end>` instead of 
 
 ## /open-issue Command
 
-If the user replies to a review comment with `/open-issue <number>` (where number matches a finding from the review):
-
-1. Look up the finding by number from the most recent review JSON in `.kiro/reviews/`
-2. Create an issue:
-   ```
-   gh issue create \
-     --title "Code review: <brief description>" \
-     --body "Found during review of PR #<PR_NUMBER>.
-
-   **Severity:** <severity>
-   **Confidence:** <confidence>
-   **File:** <file>#L<start>-L<end>
-   **Source:** <source>
-
-   <description>
-
-   ---
-   *Auto-created from [code review](https://github.com/<REPO>/pull/<PR_NUMBER>).*" \
-     --label "code-review"
-   ```
-3. Reply on the PR confirming: "Created issue #<N> for finding <number>."
+The `/open-issue` slash command is handled by a separate GitHub Actions workflow (`open-issue-from-review.yml`), not by this agent. The workflow parses the `REVIEW_DATA` HTML comment embedded in the review body. No action needed from this agent — just ensure the `<!-- REVIEW_DATA: [...] -->` comment is included in every review.
