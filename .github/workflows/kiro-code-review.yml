@@ -39,6 +39,7 @@ jobs:
             "Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}"
 
       - name: Check review results
+        if: github.event_name == 'pull_request'
         run: |
           REVIEW=$(ls -t .kiro/reviews/*.json 2>/dev/null | head -1)
           if [ -z "$REVIEW" ]; then
