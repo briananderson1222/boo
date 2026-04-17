@@ -1,0 +1,33 @@
+{
+  "name": "codebase-scanner",
+  "description": "Full-repo code scanner — finds bugs, security issues, and tech debt, creates a summary GitHub issue",
+  "prompt": "file://../prompts/codebase-scan.md",
+  "tools": ["read", "write", "shell", "grep", "glob", "subagent"],
+  "allowedTools": ["read", "write", "shell", "grep", "glob", "subagent"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": [".kiro/reviews/**"]
+    },
+    "shell": {
+      "allowedCommands": [
+        "gh issue create",
+        "gh issue list",
+        "gh issue view",
+        "git log",
+        "git rev-parse",
+        "find"
+      ]
+    },
+    "subagent": {
+      "availableAgents": ["review-pass", "review-scorer"],
+      "trustedAgents": ["review-pass", "review-scorer"]
+    }
+  },
+  "resources": [
+    "skill://.kiro/skills/review-criteria/SKILL.md",
+    "file://CLAUDE.md",
+    "file://AGENTS.md",
+    "file://CONTRIBUTING.md",
+    "file://.kiro/steering/**/*.md"
+  ]
+}

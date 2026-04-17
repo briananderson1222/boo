@@ -1,0 +1,39 @@
+{
+  "name": "code-reviewer",
+  "description": "Automated PR code reviewer — orchestrates parallel review passes, submits formal GitHub reviews",
+  "prompt": "file://../prompts/code-review.md",
+  "tools": ["read", "write", "shell", "grep", "glob", "subagent"],
+  "allowedTools": ["read", "write", "shell", "grep", "glob", "subagent"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": [".kiro/reviews/**"]
+    },
+    "shell": {
+      "allowedCommands": [
+        "gh pr view",
+        "gh pr diff",
+        "gh pr list",
+        "gh pr review",
+        "gh issue create",
+        "gh issue list",
+        "git log",
+        "git blame",
+        "git rev-parse",
+        "git diff",
+        "git merge-base",
+        "git branch"
+      ]
+    },
+    "subagent": {
+      "availableAgents": ["review-pass", "review-scorer"],
+      "trustedAgents": ["review-pass", "review-scorer"]
+    }
+  },
+  "resources": [
+    "skill://.kiro/skills/review-criteria/SKILL.md",
+    "file://CLAUDE.md",
+    "file://AGENTS.md",
+    "file://CONTRIBUTING.md",
+    "file://.kiro/steering/**/*.md"
+  ]
+}

@@ -1,0 +1,64 @@
+name: Kiro Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+  workflow_dispatch:
+    inputs:
+      review_gate:
+        description: 'How to handle review issues: fail, warn, or info'
+        type: choice
+        options: [fail, warn, info]
+        default: warn
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    env:
+      REVIEW_GATE: ${{ inputs.review_gate || vars.REVIEW_GATE || 'warn' }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Kiro CLI
+        run: curl -fsSL https://cli.kiro.dev/install | bash
+
+      - name: Run Kiro code review
+        env:
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          kiro-cli chat --agent code-reviewer --no-interactive \
+            "Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}"
+
+      - name: Check review results
+        if: github.event_name == 'pull_request'
+        run: |
+          REVIEW=$(ls -t .kiro/reviews/*.json 2>/dev/null | head -1)
+          if [ -z "$REVIEW" ]; then
+            echo "::error::No review output found in .kiro/reviews/"
+            exit 1
+          fi
+
+          ISSUES=$(jq '.issues_found // 0' "$REVIEW" 2>/dev/null || echo 0)
+          HAS_BLOCKERS=$(jq '[(.issues // [])[] | select(.severity == "CRITICAL" or .severity == "HIGH") | select(.confidence >= 70)] | length > 0' "$REVIEW" 2>/dev/null || echo false)
+
+          echo "Issues found: $ISSUES"
+          echo "Has blockers: $HAS_BLOCKERS"
+          jq '.' "$REVIEW"
+
+          # The agent already submitted gh pr review (approve/comment/request-changes).
+          # This step only controls the CI status for the REVIEW_GATE override.
+          if [ "$HAS_BLOCKERS" = "true" ] && [ "$REVIEW_GATE" = "fail" ]; then
+            echo "::error::Review found blocking issue(s) — failing build (REVIEW_GATE=fail)"
+            exit 1
+          elif [ "$ISSUES" -gt 0 ] && [ "$REVIEW_GATE" = "warn" ]; then
+            echo "::warning::Review found $ISSUES issue(s)"
+          fi
