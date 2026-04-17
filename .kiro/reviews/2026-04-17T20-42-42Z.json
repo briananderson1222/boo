@@ -1,0 +1,25 @@
+{
+  "mode": "pr",
+  "ref": "5",
+  "repo": "briananderson1222/boo",
+  "sha": "102a4bb85411f9f2cdaea12f2086465f8e8db609",
+  "issues_found": 2,
+  "issues": [
+    {
+      "file": ".github/workflows/kiro-code-review.yml",
+      "line": "44-52",
+      "description": "`jq '.issues_found'` returns the literal string `null` if the key is missing or the JSON is malformed. The subsequent `[ \"$ISSUES\" -gt 0 ]` bash integer comparison fails with `[: null: integer expression expected`, causing the step to exit non-zero regardless of REVIEW_GATE setting. Fix: use `jq '.issues_found // 0'` and validate the value is numeric.",
+      "source": "bug",
+      "severity": "HIGH",
+      "confidence": 85
+    },
+    {
+      "file": ".github/workflows/kiro-code-review.yml",
+      "line": "33-34",
+      "description": "`github.event.pull_request.number` is unset when triggered via `workflow_dispatch`, producing `\"Review PR # in owner/repo\"` with a blank PR number. The agent will fail or behave unpredictably. Consider gating the kiro-cli step with `if: github.event_name == 'pull_request'` or requiring a PR number input for manual dispatch.",
+      "source": "bug",
+      "severity": "MEDIUM",
+      "confidence": 70
+    }
+  ]
+}
