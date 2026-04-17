@@ -1,0 +1,33 @@
+name: Kiro Codebase Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      scan_path:
+        description: 'Directory to scan (default: full repo)'
+        type: string
+        default: '.'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Kiro CLI
+        run: curl -fsSL https://cli.kiro.dev/install | bash
+
+      - name: Run codebase scan
+        env:
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          kiro-cli chat --agent codebase-scanner --no-interactive \
+            "Scan ${{ inputs.scan_path }} in ${{ github.repository }}, triggered by ${{ github.triggering_actor }}"

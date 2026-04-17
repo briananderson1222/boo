@@ -1,7 +1,7 @@
 {
-  "name": "code-reviewer",
-  "description": "Automated PR code reviewer — orchestrates parallel review passes, submits formal GitHub reviews",
-  "prompt": "file://../prompts/code-review.md",
+  "name": "codebase-scanner",
+  "description": "Full-repo code scanner — finds bugs, security issues, and tech debt, creates a summary GitHub issue",
+  "prompt": "file://../prompts/codebase-scan.md",
   "tools": ["read", "write", "shell", "grep", "glob", "subagent"],
   "allowedTools": ["read", "write", "shell", "grep", "glob", "subagent"],
   "toolsSettings": {
@@ -10,18 +10,12 @@
     },
     "shell": {
       "allowedCommands": [
-        "gh pr view",
-        "gh pr diff",
-        "gh pr list",
-        "gh pr review",
         "gh issue create",
         "gh issue list",
+        "gh issue view",
         "git log",
-        "git blame",
         "git rev-parse",
-        "git diff",
-        "git merge-base",
-        "git branch"
+        "find"
       ]
     },
     "subagent": {

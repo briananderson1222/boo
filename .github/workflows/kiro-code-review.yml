@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      issues: read
+      issues: write
 
     steps:
       - name: Checkout repository
@@ -45,18 +45,19 @@ jobs:
             echo "::error::No review output found in .kiro/reviews/"
             exit 1
           fi
-          ISSUES=$(jq '.issues_found' "$REVIEW")
-          echo "Review: $REVIEW"
+
+          ISSUES=$(jq '.issues_found // 0' "$REVIEW")
+          HAS_BLOCKERS=$(jq '[(.issues // [])[] | select(.severity == "CRITICAL" or .severity == "HIGH") | select(.confidence >= 70)] | length > 0' "$REVIEW")
+
           echo "Issues found: $ISSUES"
+          echo "Has blockers: $HAS_BLOCKERS"
           jq '.' "$REVIEW"
-          if [ "$ISSUES" -gt 0 ]; then
-            case "$REVIEW_GATE" in
-              fail)
-                echo "::error::Review found $ISSUES issue(s) — failing build"
-                exit 1 ;;
-              warn)
-                echo "::warning::Review found $ISSUES issue(s)" ;;
-              *)
-                echo "Review found $ISSUES issue(s) (informational)" ;;
-            esac
+
+          # The agent already submitted gh pr review (approve/comment/request-changes).
+          # This step only controls the CI status for the REVIEW_GATE override.
+          if [ "$HAS_BLOCKERS" = "true" ] && [ "$REVIEW_GATE" = "fail" ]; then
+            echo "::error::Review found blocking issue(s) — failing build (REVIEW_GATE=fail)"
+            exit 1
+          elif [ "$ISSUES" -gt 0 ] && [ "$REVIEW_GATE" = "warn" ]; then
+            echo "::warning::Review found $ISSUES issue(s)"
           fi
