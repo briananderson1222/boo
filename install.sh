@@ -41,6 +41,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dir) TARGET_DIR="$2"; shift 2 ;;
+    --source) SOURCE_DIR="$2"; shift 2 ;;
     --component) COMPONENTS+=("$2"); shift 2 ;;
     --help) usage ;;
     *) echo "Unknown option: $1"; usage ;;
@@ -60,7 +61,11 @@ fetch() {
   local path="$1"
   local dest="$TARGET_DIR/$path"
   mkdir -p "$(dirname "$dest")"
-  curl -fsSL "https://raw.githubusercontent.com/$REPO/$BRANCH/$path" -o "$dest"
+  if [ -n "$SOURCE_DIR" ]; then
+    cp "$SOURCE_DIR/$path" "$dest"
+  else
+    curl -fsSL "https://raw.githubusercontent.com/$REPO/$BRANCH/$path" -o "$dest"
+  fi
   echo "  ✓ $path"
 }
 
