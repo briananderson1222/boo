@@ -116,7 +116,11 @@ Found N issue(s) that should be addressed before merging.
 Reply `/open-issue <number>` on any finding to create a tracking issue for it.
 
 👻 Generated with [Kiro CLI](https://kiro.dev/docs/cli/)
+
+<!-- REVIEW_DATA: <JSON array of issues> -->
 ```
+
+Include the full issues array as a single-line JSON string inside the `<!-- REVIEW_DATA: ... -->` HTML comment. This allows the `/open-issue` workflow to parse findings directly from the review comment without needing the review JSON file.
 
 **If commenting (no blockers):**
 ```
@@ -131,7 +135,11 @@ Found N item(s) worth noting (none blocking).
 Reply `/open-issue <number>` on any finding to create a tracking issue for it.
 
 👻 Generated with [Kiro CLI](https://kiro.dev/docs/cli/)
+
+<!-- REVIEW_DATA: <JSON array of issues> -->
 ```
+
+Include the full issues array as a single-line JSON string inside the `<!-- REVIEW_DATA: ... -->` HTML comment. This allows the `/open-issue` workflow to parse findings directly from the review comment without needing the review JSON file.
 
 **If approving:**
 ```

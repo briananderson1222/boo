@@ -11,14 +11,10 @@ jobs:
       startsWith(github.event.comment.body, '/open-issue')
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       issues: write
       pull-requests: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Parse and create issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -28,22 +24,24 @@ jobs:
         run: |
           FINDING_NUM=$(echo "$COMMENT_BODY" | grep -oP '(?<=/open-issue\s)\d+' | head -1)
           if [ -z "$FINDING_NUM" ]; then
-            gh pr comment "$PR_NUMBER" --body "❌ Usage: \`/open-issue <number>\` where number matches a finding from the review."
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "❌ Usage: \`/open-issue <number>\` where number matches a finding from the review."
             exit 0
           fi
 
-          # Find the most recent review JSON
-          REVIEW=$(ls -t .kiro/reviews/*.json 2>/dev/null | head -1)
-          if [ -z "$REVIEW" ]; then
-            gh pr comment "$PR_NUMBER" --body "❌ No review JSON found in \`.kiro/reviews/\`."
+          # Find the review comment containing REVIEW_DATA
+          REVIEW_JSON=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json reviews \
+            --jq '[.reviews[].body | select(contains("REVIEW_DATA"))] | last' \
+            | grep -oP '(?<=<!-- REVIEW_DATA: ).*(?= -->)' || true)
+
+          if [ -z "$REVIEW_JSON" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "❌ No review data found. The review comment may be missing the embedded findings."
             exit 0
           fi
 
-          # Extract the finding by index (1-based)
-          FINDING=$(jq --argjson n "$FINDING_NUM" '.issues[$n - 1] // empty' "$REVIEW")
+          FINDING=$(echo "$REVIEW_JSON" | jq --argjson n "$FINDING_NUM" '.[$n - 1] // empty')
           if [ -z "$FINDING" ]; then
-            TOTAL=$(jq '.issues | length' "$REVIEW")
-            gh pr comment "$PR_NUMBER" --body "❌ Finding #$FINDING_NUM not found. The last review has $TOTAL finding(s)."
+            TOTAL=$(echo "$REVIEW_JSON" | jq 'length')
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "❌ Finding #$FINDING_NUM not found. The last review has $TOTAL finding(s)."
             exit 0
           fi
 
@@ -54,8 +52,8 @@ jobs:
           CONFIDENCE=$(echo "$FINDING" | jq -r '.confidence')
           SOURCE=$(echo "$FINDING" | jq -r '.source')
 
-          ISSUE_URL=$(gh issue create \
-            --title "Code review: $DESC" \
+          ISSUE_URL=$(gh issue create --repo "$REPO" \
+            --title "Code review: ${DESC:0:80}" \
             --body "Found during review of PR #$PR_NUMBER.
 
           **Severity:** $SEVERITY
@@ -70,4 +68,4 @@ jobs:
             --label "code-review")
 
           ISSUE_NUM=$(echo "$ISSUE_URL" | grep -oP '\d+$')
-          gh pr comment "$PR_NUMBER" --body "✅ Created issue #$ISSUE_NUM for finding #$FINDING_NUM."
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "✅ Created issue #$ISSUE_NUM for finding #$FINDING_NUM."
