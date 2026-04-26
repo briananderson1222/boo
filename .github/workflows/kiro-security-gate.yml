@@ -1,0 +1,60 @@
+name: Kiro Security Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  security-review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted workflow code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: trusted
+
+      - name: Checkout pull request code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: workspace
+
+      - name: Check trusted recipe availability
+        id: recipe
+        run: |
+          if [[ -f trusted/.github/actions/kiro-review/action.yml ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Kiro recipe is not present on the base branch yet; skipping first-install PR run."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Kiro security review
+        if: steps.recipe.outputs.available == 'true'
+        id: kiro
+        uses: ./trusted/.github/actions/kiro-review
+        env:
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+        with:
+          agent: security-reviewer
+          base-ref: origin/${{ github.base_ref }}
+          review-kind: security review
+          strict: "true"
+          workdir: workspace
+
+      - name: Upload review artifact
+        if: steps.recipe.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiro-security-review
+          path: |
+            ${{ steps.kiro.outputs.review_markdown_path }}
+            ${{ steps.kiro.outputs.review_json_path }}
+
+      - name: Fail on critical findings
+        if: steps.recipe.outputs.available == 'true'
+        run: node trusted/scripts/fail-on-critical.mjs "${{ steps.kiro.outputs.review_json_path }}"

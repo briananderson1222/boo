@@ -1,0 +1,56 @@
+name: Kiro Docs Drift
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  docs-drift:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout trusted workflow code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: trusted
+
+      - name: Checkout pull request code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: workspace
+
+      - name: Check trusted recipe availability
+        id: recipe
+        run: |
+          if [[ -f trusted/.github/actions/kiro-review/action.yml ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Kiro recipe is not present on the base branch yet; skipping first-install PR run."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Kiro docs drift review
+        if: steps.recipe.outputs.available == 'true'
+        id: kiro
+        uses: ./trusted/.github/actions/kiro-review
+        env:
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+        with:
+          agent: docs-drift-reviewer
+          base-ref: origin/${{ github.base_ref }}
+          review-kind: documentation drift review
+          strict: "false"
+          workdir: workspace
+
+      - name: Post PR review
+        if: steps.recipe.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ./trusted/scripts/post-pr-review.sh "${{ steps.kiro.outputs.review_markdown_path }}"
