@@ -23,18 +23,38 @@ jobs:
       - name: Resolve selected finding
         env:
           GH_TOKEN: ${{ github.token }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
           PR_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
         run: |
-          FINDING_NUM=$(node trusted/scripts/parse-review-command.mjs /kiro-fix "$COMMENT_BODY")
-          if [ -z "$FINDING_NUM" ]; then
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Usage: \`/kiro-fix <number>\` where number matches a normalized Kiro finding."
-            exit 1
+          PERMISSION=$(gh api "repos/$REPO/collaborators/$COMMENT_AUTHOR/permission" --jq .permission 2>/dev/null || echo none)
+          if ! node trusted/scripts/check-comment-permission.mjs "$PERMISSION"; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Only repository collaborators with write, maintain, or admin permission can run \`/kiro-fix\`."
+            exit 0
           fi
 
+          gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq .body > comment-body.txt
+          FINDING_NUM=$(node trusted/scripts/parse-review-command.mjs /kiro-fix --file comment-body.txt)
+          if [ -z "$FINDING_NUM" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Usage: \`/kiro-fix <number>\` where number matches a normalized Kiro finding."
+            exit 0
+          fi
+
+          COMMENT_CREATED="${{ github.event.comment.created_at }}"
           REVIEW_BODY=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq '[.[] | select(.body | contains("REVIEW_DATA"))] | last | .body')
+            --jq "[.[] | select(.body | contains(\"REVIEW_DATA\")) | select(.submitted_at < \"$COMMENT_CREATED\")] | last | .body" \
+            || true)
+          if [ -z "$REVIEW_BODY" ]; then
+            REVIEW_BODY=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
+              --jq '[.[] | select(.body | contains("REVIEW_DATA"))] | last | .body' \
+              || true)
+          fi
+          if [ -z "$REVIEW_BODY" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "No Kiro review data found on this pull request."
+            exit 0
+          fi
+
           printf '%s\n' "$REVIEW_BODY" > review-body.md
           node trusted/scripts/normalize-review-output.mjs review-body.md --json review-findings.json --markdown normalized-review.md --strict
           node trusted/scripts/select-review-finding.mjs review-findings.json "$FINDING_NUM" > selected-finding.json
