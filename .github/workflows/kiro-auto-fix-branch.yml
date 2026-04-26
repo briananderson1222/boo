@@ -1,0 +1,120 @@
+name: Kiro Auto-Fix Branch
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  fix-branch:
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/kiro-fix')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout trusted workflow code
+        uses: actions/checkout@v4
+        with:
+          # Keep scripts and agent config out of PR control. The PR branch is
+          # checked out separately under workspace/ after command validation.
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+
+      - name: Resolve selected finding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+        run: |
+          if ! PERMISSION=$(gh api "repos/$REPO/collaborators/$COMMENT_AUTHOR/permission" --jq .permission); then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Unable to verify repository permission for \`/kiro-fix\`. No branch was created."
+            exit 0
+          fi
+
+          if ! node trusted/scripts/check-comment-permission.mjs "$PERMISSION"; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Only repository collaborators with write, maintain, or admin permission can run \`/kiro-fix\`."
+            exit 0
+          fi
+
+          gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq .body > comment-body.txt
+          FINDING_NUM=$(node trusted/scripts/parse-review-command.mjs /kiro-fix --file comment-body.txt)
+          if [ -z "$FINDING_NUM" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Usage: \`/kiro-fix <number>\` where number matches a normalized Kiro finding."
+            exit 0
+          fi
+
+          COMMENT_CREATED="${{ github.event.comment.created_at }}"
+          REVIEW_BODY=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
+            --jq "[.[] | select(.body | contains(\"REVIEW_DATA\")) | select(.submitted_at < \"$COMMENT_CREATED\")] | last | .body" \
+            || true)
+          if [ -z "$REVIEW_BODY" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "No earlier Kiro review data found on this pull request. Run review again, then retry \`/kiro-fix <number>\`."
+            exit 0
+          fi
+
+          printf '%s\n' "$REVIEW_BODY" > review-body.md
+          node trusted/scripts/normalize-review-output.mjs review-body.md --json review-findings.json --markdown normalized-review.md --strict
+          node trusted/scripts/select-review-finding.mjs review-findings.json "$FINDING_NUM" > selected-finding.json
+
+      - name: Checkout pull request branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: workspace
+
+      - name: Switch to pull request branch
+        working-directory: workspace
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: gh pr checkout "$PR_NUMBER" --repo "$REPO"
+
+      - name: Create fix branch
+        working-directory: workspace
+        run: |
+          git checkout -b "kiro/pr-${{ github.event.issue.number }}/finding-${{ github.run_id }}"
+          mkdir -p .kiro/agents
+          cp ../trusted/.kiro/agents/fix-branch-writer.json .kiro/agents/fix-branch-writer.json
+          cp ../selected-finding.json .kiro-selected-finding.json
+
+      - name: Install Kiro CLI
+        run: |
+          curl -fsSL https://cli.kiro.dev/install | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run Kiro fixer
+        working-directory: workspace
+        env:
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+        run: |
+          kiro-cli --version
+          PROMPT=$(node -e 'const fs=require("fs"); const finding=fs.readFileSync(".kiro-selected-finding.json", "utf8"); process.stdout.write(`Fix exactly this normalized review finding in a minimal branch. Do not address unrelated issues.\n\n${finding}`);')
+          kiro-cli chat \
+            --no-interactive \
+            --trust-tools=read,grep,write \
+            --agent fix-branch-writer \
+            "$PROMPT"
+
+      - name: Commit and open fix PR
+        working-directory: workspace
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          if git diff --quiet; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Kiro did not produce a diff for the selected finding."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Address Kiro review finding"
+          git push --set-upstream origin HEAD
+          gh pr create --repo "$REPO" --title "Address Kiro finding from PR #$PR_NUMBER" --body "Automated fix branch for PR #$PR_NUMBER. Review before merging."

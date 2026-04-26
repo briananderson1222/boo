@@ -1,0 +1,15 @@
+{
+  "name": "fix-branch-writer",
+  "description": "Opt-in branch-writing agent that fixes one selected normalized review finding.",
+  "tools": ["read", "grep", "write"],
+  "allowedTools": ["read", "grep", "write"],
+  "resources": [
+    "file://README.md",
+    "file://package.json",
+    "file://src/**/*",
+    "file://test/**/*",
+    "file://tests/**/*"
+  ],
+  "prompt": "You are a focused remediation agent running in CI on a standalone branch. Fix only the selected review finding provided in the prompt. Keep the diff minimal, update or add tests when behavior changes, and do not address unrelated issues. Do not run shell commands. Summarize changed files and any verification the human should run.",
+  "model": "claude-sonnet-4"
+}
