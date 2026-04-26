@@ -68,6 +68,7 @@ $(cat "$diff_file")" > "$raw_output"
 node "$script_dir/normalize-review-output.mjs" "$raw_output" \
   --json "$output_json" \
   --markdown "$output_markdown" \
+  --title "$review_kind" \
   "${strict_args[@]}"
 
 cat "$output_markdown"
