@@ -25,7 +25,7 @@ jobs:
           PR_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
         run: |
-          FINDING_NUM=$(node -e 'const match = process.env.COMMENT_BODY.match(/^\/open-issue\s+(\d+)/); if (match) console.log(match[1]);')
+          FINDING_NUM=$(node scripts/parse-review-command.mjs /open-issue "$COMMENT_BODY")
           if [ -z "$FINDING_NUM" ]; then
             gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Usage: \`/open-issue <number>\` where number matches a finding from the Kiro review."
             exit 0
