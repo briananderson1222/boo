@@ -1,0 +1,96 @@
+name: Kiro Review
+description: Run Kiro CLI headless review and normalize the output for workflow policy steps.
+
+inputs:
+  agent:
+    description: Local Kiro agent name.
+    required: false
+    default: code-reviewer
+  base-ref:
+    description: Git ref used as the diff base.
+    required: false
+    default: origin/main
+  review-kind:
+    description: Human-readable review mode included in the Kiro prompt.
+    required: false
+    default: PR review
+  output-markdown:
+    description: Path for normalized markdown review output.
+    required: false
+    default: review-output.md
+  output-json:
+    description: Path for normalized JSON findings output.
+    required: false
+    default: review-findings.json
+  strict:
+    description: Fail when REVIEW_DATA is missing, malformed, or violates the normalized schema.
+    required: false
+    default: "false"
+  workdir:
+    description: Repository workspace to review. The action/scripts may come from a separate trusted checkout.
+    required: false
+    default: "."
+
+outputs:
+  review_markdown_path:
+    description: Path to normalized markdown review output.
+    value: ${{ steps.run-review.outputs.review_markdown_path }}
+  review_json_path:
+    description: Path to normalized JSON findings output.
+    value: ${{ steps.run-review.outputs.review_json_path }}
+  finding_count:
+    description: Total normalized finding count.
+    value: ${{ steps.run-review.outputs.finding_count }}
+  critical_count:
+    description: Total normalized critical finding count.
+    value: ${{ steps.run-review.outputs.critical_count }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Kiro CLI
+      shell: bash
+      run: |
+        curl -fsSL https://cli.kiro.dev/install | bash
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Run Kiro review
+      id: run-review
+      shell: bash
+      run: |
+        strict_args=()
+        if [[ "${{ inputs.strict }}" == "true" ]]; then
+          strict_args=(--strict)
+        fi
+
+        trusted_root="$(cd "${{ github.action_path }}/../../.." && pwd)"
+        review_workdir="$(cd "${{ inputs.workdir }}" && pwd)"
+        output_markdown="${{ inputs.output-markdown }}"
+        output_json="${{ inputs.output-json }}"
+        trusted_agent="$trusted_root/.kiro/agents/${{ inputs.agent }}.json"
+
+        if [[ ! -f "$trusted_agent" ]]; then
+          echo "Trusted Kiro agent not found: $trusted_agent" >&2
+          exit 2
+        fi
+
+        if [[ "$output_markdown" != /* ]]; then
+          output_markdown="$review_workdir/$output_markdown"
+        fi
+
+        if [[ "$output_json" != /* ]]; then
+          output_json="$review_workdir/$output_json"
+        fi
+
+        mkdir -p "$review_workdir/.kiro/agents"
+        cp "$trusted_agent" "$review_workdir/.kiro/agents/${{ inputs.agent }}.json"
+
+        cd "$review_workdir"
+
+        "$trusted_root/scripts/run-kiro-review.sh" \
+          --agent "${{ inputs.agent }}" \
+          --base-ref "${{ inputs.base-ref }}" \
+          --review-kind "${{ inputs.review-kind }}" \
+          --output-markdown "$output_markdown" \
+          --output-json "$output_json" \
+          "${strict_args[@]}"

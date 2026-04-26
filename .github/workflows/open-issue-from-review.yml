@@ -11,80 +11,74 @@ jobs:
       startsWith(github.event.comment.body, '/open-issue')
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: write
       pull-requests: write
 
     steps:
-      - name: Parse and create issue
+      - uses: actions/checkout@v4
+
+      - name: Parse review finding and create issue
         env:
           GH_TOKEN: ${{ github.token }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
           PR_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
         run: |
-          FINDING_NUM=$(echo "$COMMENT_BODY" | grep -oP '(?<=/open-issue\s)\d+' | head -1)
+          PERMISSION=$(gh api "repos/$REPO/collaborators/$COMMENT_AUTHOR/permission" --jq .permission 2>/dev/null || echo none)
+          if ! node scripts/check-comment-permission.mjs "$PERMISSION"; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Only repository collaborators with write, maintain, or admin permission can run \`/open-issue\`."
+            exit 0
+          fi
+
+          gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq .body > comment-body.txt
+          FINDING_NUM=$(node scripts/parse-review-command.mjs /open-issue --file comment-body.txt)
           if [ -z "$FINDING_NUM" ]; then
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "❌ Usage: \`/open-issue <number>\` where number matches a finding from the review."
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Usage: \`/open-issue <number>\` where number matches a finding from the Kiro review."
             exit 0
           fi
 
-          # Find the most recent review containing REVIEW_DATA posted before this comment
           COMMENT_CREATED="${{ github.event.comment.created_at }}"
-          REVIEW_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
+          REVIEW_BODY=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
             --jq "[.[] | select(.body | contains(\"REVIEW_DATA\")) | select(.submitted_at < \"$COMMENT_CREATED\")] | last | .body" \
-            | grep -oP '(?<=<!-- REVIEW_DATA: ).*(?= -->)' || true)
+            || true)
 
-          # Fallback: if no review found before this comment, try the latest one
-          if [ -z "$REVIEW_JSON" ]; then
-            REVIEW_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
+          if [ -z "$REVIEW_BODY" ]; then
+            REVIEW_BODY=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
               --jq '[.[] | select(.body | contains("REVIEW_DATA"))] | last | .body' \
-              | grep -oP '(?<=<!-- REVIEW_DATA: ).*(?= -->)' || true)
+              || true)
           fi
 
-          if [ -z "$REVIEW_JSON" ]; then
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "❌ No review data found. The review comment may be missing the embedded findings."
+          if [ -z "$REVIEW_BODY" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "No Kiro review data found on this pull request."
             exit 0
           fi
 
-          FINDING=$(echo "$REVIEW_JSON" | jq --argjson n "$FINDING_NUM" '.[$n - 1] // empty')
-          if [ -z "$FINDING" ]; then
-            TOTAL=$(echo "$REVIEW_JSON" | jq 'length')
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "❌ Finding #$FINDING_NUM not found. The last review has $TOTAL finding(s)."
+          printf '%s\n' "$REVIEW_BODY" > review-body.md
+          node scripts/normalize-review-output.mjs review-body.md --json review-findings.json --markdown normalized-review.md --strict
+
+          if ! node scripts/select-review-finding.mjs review-findings.json "$FINDING_NUM" > selected-finding.json; then
+            TOTAL=$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync("review-findings.json","utf8")); console.log((data.findings||[]).length)')
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Finding #$FINDING_NUM not found. The latest Kiro review has $TOTAL finding(s)."
             exit 0
           fi
 
-          FILE=$(echo "$FINDING" | jq -r '.file')
-          LINE=$(echo "$FINDING" | jq -r '.line')
-          DESC=$(echo "$FINDING" | jq -r '.description')
-          SEVERITY=$(echo "$FINDING" | jq -r '.severity')
-          CONFIDENCE=$(echo "$FINDING" | jq -r '.confidence')
-          SOURCE=$(echo "$FINDING" | jq -r '.source')
-          SHORT_DESC="${DESC:0:80}"
+          TITLE=$(node -e 'const fs=require("fs"); console.log(JSON.parse(fs.readFileSync("selected-finding.json","utf8")).title)')
+          SHORT_DESC=$(node -e 'const fs=require("fs"); console.log(JSON.parse(fs.readFileSync("selected-finding.json","utf8")).shortDescription)')
+          node -e 'const fs=require("fs"); const selected=JSON.parse(fs.readFileSync("selected-finding.json","utf8")); fs.writeFileSync("issue-body.md", `Found during Kiro review of PR #${process.env.PR_NUMBER}.\n\n${selected.body}\n\n---\nAuto-created from https://github.com/${process.env.REPO}/pull/${process.env.PR_NUMBER}.\n`)'
 
-          # Check for existing issue with same title prefix to prevent duplicates
           EXISTING=$(gh issue list --repo "$REPO" --label "code-review" --state open \
             --search "Code review: ${SHORT_DESC}" --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "> **[${SEVERITY}]** ${SHORT_DESC}...
-
-          ℹ️ Finding #$FINDING_NUM already tracked in issue #$EXISTING."
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Finding #$FINDING_NUM is already tracked in issue #$EXISTING."
             exit 0
           fi
 
           ISSUE_URL=$(gh issue create --repo "$REPO" \
-            --title "Code review: $SHORT_DESC" \
-            --body "Found during review of PR #$PR_NUMBER.
-
-          **Severity:** $SEVERITY
-          **Confidence:** $CONFIDENCE
-          **File:** \`$FILE#L$LINE\`
-          **Source:** $SOURCE
-
-          $DESC
-
-          ---
-          *Auto-created from [code review](https://github.com/$REPO/pull/$PR_NUMBER).*" \
+            --title "$TITLE" \
+            --body-file issue-body.md \
             --label "code-review")
 
-          ISSUE_NUM=$(echo "$ISSUE_URL" | grep -oP '\d+$')
-          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "✅ Created issue #$ISSUE_NUM for finding #$FINDING_NUM."
+          ISSUE_NUM="${ISSUE_URL##*/}"
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Created issue #$ISSUE_NUM for finding #$FINDING_NUM."
