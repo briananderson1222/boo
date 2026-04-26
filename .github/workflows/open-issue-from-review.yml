@@ -21,11 +21,19 @@ jobs:
       - name: Parse review finding and create issue
         env:
           GH_TOKEN: ${{ github.token }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
           PR_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
         run: |
-          FINDING_NUM=$(node scripts/parse-review-command.mjs /open-issue "$COMMENT_BODY")
+          PERMISSION=$(gh api "repos/$REPO/collaborators/$COMMENT_AUTHOR/permission" --jq .permission 2>/dev/null || echo none)
+          if ! node scripts/check-comment-permission.mjs "$PERMISSION"; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Only repository collaborators with write, maintain, or admin permission can run \`/open-issue\`."
+            exit 0
+          fi
+
+          gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq .body > comment-body.txt
+          FINDING_NUM=$(node scripts/parse-review-command.mjs /open-issue --file comment-body.txt)
           if [ -z "$FINDING_NUM" ]; then
             gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Usage: \`/open-issue <number>\` where number matches a finding from the Kiro review."
             exit 0
