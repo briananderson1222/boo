@@ -53,7 +53,15 @@ kiro-cli chat \
   --no-interactive \
   --trust-tools=read,grep \
   --agent "$agent" \
-  "Run a ${review_kind} for this diff. Return concise markdown findings and the required REVIEW_DATA payload.
+  "Run a ${review_kind} for this diff. Return concise markdown findings.
+
+Your final line is mandatory automation data. End with exactly one single-line HTML comment matching this shape:
+<!-- REVIEW_DATA: [{\"severity\":\"HIGH\",\"confidence\":\"medium\",\"file\":\"src/app.js\",\"line\":1,\"description\":\"short actionable description\",\"source\":\"kiro\"}] -->
+
+If there are no findings, the final line must be exactly:
+<!-- REVIEW_DATA: [] -->
+
+Do not omit REVIEW_DATA. Do not wrap REVIEW_DATA in a code fence.
 
 $(cat "$diff_file")" > "$raw_output"
 
