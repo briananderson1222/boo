@@ -27,7 +27,7 @@ jobs:
           PR_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
         run: |
-          FINDING_NUM=$(node -e 'const match = process.env.COMMENT_BODY.match(/^\/kiro-fix\s+(\d+)/); if (match) console.log(match[1]);')
+          FINDING_NUM=$(node trusted/scripts/parse-review-command.mjs /kiro-fix "$COMMENT_BODY")
           if [ -z "$FINDING_NUM" ]; then
             gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Usage: \`/kiro-fix <number>\` where number matches a normalized Kiro finding."
             exit 1
@@ -74,7 +74,7 @@ jobs:
           kiro-cli --version
           kiro-cli chat \
             --no-interactive \
-            --trust-tools=read,grep,write,shell \
+            --trust-tools=read,grep,write \
             --agent fix-branch-writer \
             "Fix exactly this normalized review finding in a minimal branch. Do not address unrelated issues.
 
