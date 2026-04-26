@@ -28,7 +28,11 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id }}
           COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
         run: |
-          PERMISSION=$(gh api "repos/$REPO/collaborators/$COMMENT_AUTHOR/permission" --jq .permission 2>/dev/null || echo none)
+          if ! PERMISSION=$(gh api "repos/$REPO/collaborators/$COMMENT_AUTHOR/permission" --jq .permission); then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Unable to verify repository permission for \`/kiro-fix\`. No branch was created."
+            exit 0
+          fi
+
           if ! node trusted/scripts/check-comment-permission.mjs "$PERMISSION"; then
             gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Only repository collaborators with write, maintain, or admin permission can run \`/kiro-fix\`."
             exit 0
@@ -46,12 +50,7 @@ jobs:
             --jq "[.[] | select(.body | contains(\"REVIEW_DATA\")) | select(.submitted_at < \"$COMMENT_CREATED\")] | last | .body" \
             || true)
           if [ -z "$REVIEW_BODY" ]; then
-            REVIEW_BODY=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
-              --jq '[.[] | select(.body | contains("REVIEW_DATA"))] | last | .body' \
-              || true)
-          fi
-          if [ -z "$REVIEW_BODY" ]; then
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "No Kiro review data found on this pull request."
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "No earlier Kiro review data found on this pull request. Run review again, then retry \`/kiro-fix <number>\`."
             exit 0
           fi
 
@@ -92,13 +91,12 @@ jobs:
           KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
         run: |
           kiro-cli --version
+          PROMPT=$(node -e 'const fs=require("fs"); const finding=fs.readFileSync(".kiro-selected-finding.json", "utf8"); process.stdout.write(`Fix exactly this normalized review finding in a minimal branch. Do not address unrelated issues.\n\n${finding}`);')
           kiro-cli chat \
             --no-interactive \
             --trust-tools=read,grep,write \
             --agent fix-branch-writer \
-            "Fix exactly this normalized review finding in a minimal branch. Do not address unrelated issues.
-
-          $(cat .kiro-selected-finding.json)"
+            "$PROMPT"
 
       - name: Commit and open fix PR
         working-directory: workspace
