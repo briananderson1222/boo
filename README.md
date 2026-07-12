@@ -107,6 +107,7 @@ boo add --name "calendar-check" \
 | `--dir` | Working directory for kiro-cli | `~/.boo/workspace/<name>` |
 | `--agent` | Kiro agent to use | default agent |
 | `--model` | Kiro model override | agent default |
+| `--timezone` | IANA timezone for cron/at evaluation (e.g. `America/New_York`) | UTC |
 | `--timeout` | Max seconds before killing the job | 300 |
 | `--retry` | Max retry attempts on failure | 0 |
 | `--retry-delay` | Seconds between retries | 60 |
@@ -115,7 +116,8 @@ boo add --name "calendar-check" \
 | `--notify-start` | Send notification when job starts | false |
 | `--trust-all-tools` | Pass `--trust-all-tools` to kiro-cli | false |
 | `--trust-tools` | Trust only these tools (comma-separated) | — |
-| `--runner` | Runner type: `kiro` (default), `shell` | `kiro` |
+| `--allow-overlap` | Allow a new run to start while a prior one is still running | false |
+| `--allow-url-trigger` | Allow `boo://run` / `boo://resume` links to fire this job | false |
 | `--description` | Human-readable description of what this job does | — |
 
 ### Cron Expressions
@@ -124,7 +126,7 @@ Standard 5-field cron syntax: `minute hour day-of-month month day-of-week`
 
 ```
 * * * * *        Every minute
-0 9 * * *        Daily at 9:00 AM
+0 9 * * *        Daily at 9:00 AM (UTC unless --timezone is set)
 0 9 * * 1-5      Weekdays at 9:00 AM
 */30 * * * *     Every 30 minutes
 0 8,17 * * *     At 8:00 AM and 5:00 PM
@@ -146,7 +148,7 @@ The daemon runs a timer loop (default every 60 seconds). On each tick:
 
 ### Missed Schedule Recovery
 
-Job state is persisted to disk. When the system wakes from sleep, the next heartbeat detects overdue jobs and fires them. Missed occurrences are coalesced into a single run with `missed_count` metadata.
+Job state is persisted to disk. When the system wakes from sleep, the next heartbeat detects overdue jobs and fires them. A job that fell behind fires once on catch-up, and cron jobs record how many scheduled occurrences were skipped in `missed_count` (an on-time run reports 0).
 
 ### Retry on Failure
 
@@ -208,6 +210,8 @@ boo://run/catch-up-emails                             # Trigger a job
 boo://open/good-morning                               # Open latest artifact
 ```
 
+> **Security:** `boo://run` and `boo://resume` execute a job (or inject a prompt into its agent session), and any web page can open such a link. For that reason they are **opt-in per job**: a job only responds to these links if it was created or edited with `--allow-url-trigger true`. Otherwise the link is rejected with a message telling you how to enable it. `boo://open` (which only opens an artifact) is not gated.
+
 On macOS, a small Swift helper (BooURL.app) is compiled at install time to handle URL events. Requires Xcode Command Line Tools.
 
 ### Editing Jobs
@@ -266,7 +270,9 @@ Optional config at `~/.boo/config.json`:
 | `max_log_runs` | Max log files kept per job | 50 |
 | `heartbeat_secs` | Daemon tick interval | 60 |
 | `terminal` | Preferred terminal for resume/new-window | auto-detect |
-| `notify_webhook` | URL for fire-and-forget HTTP POST on job lifecycle events | — |
+| `notify_webhook` | URL POSTed a JSON body on job lifecycle events (`http`/`https`, TLS supported) | — |
+
+> **File permissions:** On Unix, `~/.boo` is created `0700` and `jobs.json`, `config.json`, and run logs/transcripts are written `0600`, since they can contain prompts, webhook URLs, and agent output. `notify_webhook` receives `job.started` / `job.completed` / `job.failed` events and is delivered over TLS for `https://` URLs; delivery failures are logged, not silently dropped.
 
 ## Cross-Platform Support
 
@@ -274,7 +280,7 @@ Optional config at `~/.boo/config.json`:
 |----------|-----------|-----------------|
 | macOS | launchd (`~/Library/LaunchAgents/`) | `KeepAlive` |
 | Linux | systemd user service (crontab fallback) | `Restart=always` |
-| Windows | Startup batch file | Manual |
+| Windows | Task Scheduler (logon task) | Manual |
 
 ## File Layout
 
@@ -297,7 +303,7 @@ Optional config at `~/.boo/config.json`:
 ## Development
 
 ```bash
-cargo test              # 75 tests (unit, property-based, CLI integration)
+cargo test              # unit, property-based, and CLI integration tests
 cargo clippy            # Zero warnings
 cargo build --release   # ~3.5MB binary
 ```
