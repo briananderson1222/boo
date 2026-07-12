@@ -3,7 +3,6 @@ use crate::error::{BooError, Result};
 use crate::is_pid_alive;
 use crate::job::{Job, RunRecord};
 use chrono::{DateTime, Utc};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -52,7 +51,7 @@ impl JobStore {
             .truncate(false)
             .write(true)
             .open(&self.lock_path)?;
-        lock_file.lock_exclusive()?;
+        lock_file.lock()?;
         let result = f();
         drop(lock_file);
         result

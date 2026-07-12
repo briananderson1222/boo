@@ -91,8 +91,11 @@ impl Config {
     }
 }
 
-/// Returns ~/.boo/ directory path
+/// Returns the boo data directory: $BOO_HOME if set, else ~/.boo/
 pub fn boo_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("BOO_HOME") {
+        return PathBuf::from(dir);
+    }
     dirs::home_dir()
         .expect("Could not determine home directory")
         .join(".boo")

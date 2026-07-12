@@ -551,7 +551,6 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
 /// Notification service must run on main thread (macOS requirement).
 /// Daemon runs tokio on a background thread.
 fn cmd_daemon_blocking() -> boo::error::Result<()> {
-    use fs2::FileExt;
     use std::fs::File;
 
     let boo_dir = boo::config::boo_dir();
@@ -560,7 +559,7 @@ fn cmd_daemon_blocking() -> boo::error::Result<()> {
     let pid_path = boo_dir.join("daemon.pid");
 
     let lock_file = File::create(&lock_path)?;
-    lock_file.try_lock_exclusive().map_err(|_| {
+    lock_file.try_lock().map_err(|_| {
         let existing_pid = std::fs::read_to_string(&pid_path)
             .ok()
             .and_then(|s| s.trim().parse::<u32>().ok())
@@ -2014,8 +2013,7 @@ fn is_daemon_running(pid_path: &std::path::Path) -> bool {
     // Fallback: if daemon.pid is missing/stale, check if daemon.lock is held
     let lock_path = pid_path.with_file_name("daemon.lock");
     if let Ok(file) = std::fs::File::open(&lock_path) {
-        use fs2::FileExt;
-        if file.try_lock_exclusive().is_err() {
+        if file.try_lock().is_err() {
             return true; // lock held → daemon is running
         }
         let _ = file.unlock();
