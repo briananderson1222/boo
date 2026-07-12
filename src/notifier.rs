@@ -491,3 +491,93 @@ pub fn open_file(path: &str) {
             .spawn();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::executor::ExecutionResult;
+    use crate::job::Job;
+
+    fn job() -> Job {
+        Job::new("nightly", "0 0 * * *", "do the thing", std::env::temp_dir())
+    }
+
+    fn result(success: bool, exit_code: Option<i32>, response: Option<&str>) -> ExecutionResult {
+        ExecutionResult {
+            exit_code,
+            success,
+            duration_secs: 1.25,
+            output_path: std::env::temp_dir().join("x.log"),
+            response: response.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn format_notification_success_summary_and_body() {
+        let (summary, body) = format_notification(
+            &job(),
+            &result(true, Some(0), Some("noise\nSummary: all good")),
+        );
+        assert!(summary.starts_with("✓ Job 'nightly' completed"));
+        assert!(summary.contains("1.2s") || summary.contains("1.3s"));
+        // Prefers the "Summary:" line over the last line
+        assert_eq!(body, "Summary: all good");
+    }
+
+    #[test]
+    fn format_notification_body_falls_back_to_last_nonempty_line() {
+        let (_s, body) =
+            format_notification(&job(), &result(true, Some(0), Some("first\nlast\n\n")));
+        assert_eq!(body, "last");
+    }
+
+    #[test]
+    fn format_notification_failure_reports_exit_code() {
+        let (summary, _b) = format_notification(&job(), &result(false, Some(2), None));
+        assert!(summary.starts_with("✗ Job 'nightly' failed"));
+        assert!(summary.contains("exit 2"));
+    }
+
+    #[test]
+    fn format_notification_failure_without_code_says_killed() {
+        let (summary, _b) = format_notification(&job(), &result(false, None, None));
+        assert!(summary.contains("killed"));
+    }
+
+    #[test]
+    fn webhook_payload_started() {
+        let j = job();
+        let v = webhook_payload(&j, &WebhookEvent::Started);
+        assert_eq!(v["event"], "job.started");
+        assert_eq!(v["job"], "nightly");
+        assert_eq!(v["id"], j.id.to_string()[..8]);
+    }
+
+    #[test]
+    fn webhook_payload_finished_success_is_completed() {
+        let v = webhook_payload(
+            &job(),
+            &WebhookEvent::Finished(&result(true, Some(0), None)),
+        );
+        assert_eq!(v["event"], "job.completed");
+        assert_eq!(v["success"], true);
+        assert_eq!(v["duration_secs"], 1.25);
+    }
+
+    #[test]
+    fn webhook_payload_finished_failure_is_failed() {
+        let v = webhook_payload(
+            &job(),
+            &WebhookEvent::Finished(&result(false, Some(1), None)),
+        );
+        assert_eq!(v["event"], "job.failed");
+        assert_eq!(v["success"], false);
+    }
+
+    #[test]
+    fn webhook_payload_errored_carries_message() {
+        let v = webhook_payload(&job(), &WebhookEvent::Errored("timed out"));
+        assert_eq!(v["event"], "job.failed");
+        assert_eq!(v["error"], "timed out");
+    }
+}

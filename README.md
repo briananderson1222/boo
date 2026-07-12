@@ -310,6 +310,11 @@ cargo build --release   # ~3.5MB binary
 
 See [AGENTS.md](AGENTS.md) for architecture details and contributor guidance.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build/test/lint expectations and
+[AGENTS.md](AGENTS.md) for architecture. Security issues: [SECURITY.md](SECURITY.md).
+
 ## License
 
-MIT
+Licensed under the [MIT License](LICENSE).
