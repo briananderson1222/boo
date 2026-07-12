@@ -555,8 +555,17 @@ fn test_add_accepts_claude_and_codex_runners() {
     for runner in ["claude", "codex"] {
         boo_isolated(dir.path())
             .args([
-                "add", "--name", runner, "--every", "1h", "--prompt", "hi", "--runner", runner,
-                "--dir", &tmp(),
+                "add",
+                "--name",
+                runner,
+                "--every",
+                "1h",
+                "--prompt",
+                "hi",
+                "--runner",
+                runner,
+                "--dir",
+                &tmp(),
             ])
             .assert()
             .success();
@@ -568,8 +577,17 @@ fn test_interactive_rejected_for_non_kiro_runner() {
     let dir = tempfile::tempdir().unwrap();
     boo_isolated(dir.path())
         .args([
-            "add", "--name", "cj", "--every", "1h", "--prompt", "hi", "--runner", "claude",
-            "--dir", &tmp(),
+            "add",
+            "--name",
+            "cj",
+            "--every",
+            "1h",
+            "--prompt",
+            "hi",
+            "--runner",
+            "claude",
+            "--dir",
+            &tmp(),
         ])
         .assert()
         .success();
@@ -577,7 +595,9 @@ fn test_interactive_rejected_for_non_kiro_runner() {
         .args(["run", "cj", "--interactive"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("only supported for the kiro runner"));
+        .stderr(predicate::str::contains(
+            "only supported for the kiro runner",
+        ));
 }
 
 #[cfg(unix)]
@@ -611,8 +631,19 @@ fn test_claude_runner_invokes_cli_with_prompt_on_stdin() {
 
     boo_isolated(dir.path())
         .args([
-            "add", "--name", "cs", "--every", "1h", "--prompt", "hello from boo",
-            "--runner", "claude", "--model", "claude-sonnet-4-5", "--dir", &tmp(),
+            "add",
+            "--name",
+            "cs",
+            "--every",
+            "1h",
+            "--prompt",
+            "hello from boo",
+            "--runner",
+            "claude",
+            "--model",
+            "claude-sonnet-4-5",
+            "--dir",
+            &tmp(),
         ])
         .assert()
         .success();
@@ -622,7 +653,10 @@ fn test_claude_runner_invokes_cli_with_prompt_on_stdin() {
         .success();
 
     let recorded = std::fs::read_to_string(&record).unwrap();
-    assert!(recorded.contains("-p"), "should invoke print mode: {recorded}");
+    assert!(
+        recorded.contains("-p"),
+        "should invoke print mode: {recorded}"
+    );
     assert!(
         recorded.contains("--model claude-sonnet-4-5"),
         "should pass model: {recorded}"
