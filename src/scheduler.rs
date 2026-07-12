@@ -2,7 +2,7 @@ use crate::clock::Clock;
 use crate::config::{runs_dir, Config};
 use crate::cron_eval;
 use crate::executor;
-use crate::job::{self, Job, RunRecord};
+use crate::job::{Job, RunRecord};
 use crate::notification_service::{NotificationSender, NotifyRequest};
 use crate::notifier;
 use crate::store::JobStore;
@@ -113,14 +113,7 @@ impl<C: Clock + 'static> Scheduler<C> {
         // Webhook: notify started for ALL fired jobs (not just notify_start ones)
         if let Some(ref url) = self.config.notify_webhook {
             for job in &to_fire {
-                notifier::notify_webhook(
-                    url,
-                    serde_json::json!({
-                        "event": "job.started",
-                        "job": job.name,
-                        "id": job.id.to_string()[..8],
-                    }),
-                );
+                notifier::spawn_webhook_event(url, job, notifier::WebhookEvent::Started);
             }
         }
 
@@ -189,15 +182,7 @@ impl<C: Clock + 'static> Scheduler<C> {
                 }
 
                 if let Some(ref url) = webhook_url {
-                    notifier::notify_webhook(
-                        url,
-                        serde_json::json!({
-                            "event": "job.failed",
-                            "job": job.name,
-                            "id": job.id.to_string()[..8],
-                            "error": msg,
-                        }),
-                    );
+                    notifier::spawn_webhook_event(url, &job, notifier::WebhookEvent::Errored(&msg));
                 }
             }
 
@@ -362,22 +347,7 @@ impl<C: Clock + 'static> Scheduler<C> {
         notifier::send_notification(job, &result, sender);
 
         if let Some(ref url) = webhook_url {
-            let artifact = job
-                .open_artifact
-                .as_ref()
-                .and_then(|a| job::resolve_artifact(&job.working_dir, a))
-                .map(|p| p.to_string_lossy().to_string());
-            notifier::notify_webhook(
-                url,
-                serde_json::json!({
-                    "event": if result.success { "job.completed" } else { "job.failed" },
-                    "job": job.name,
-                    "id": job.id.to_string()[..8],
-                    "success": result.success,
-                    "duration_secs": result.duration_secs,
-                    "artifact": artifact,
-                }),
-            );
+            notifier::spawn_webhook_event(url, job, notifier::WebhookEvent::Finished(&result));
         }
 
         Ok(result.success)

@@ -15,8 +15,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "6"
 thiserror = "2"
 glob = "0.3.3"
-url = "2"
 user-notify = "0.4.2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

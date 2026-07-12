@@ -670,12 +670,7 @@ async fn cmd_run(
         notifier::notify_start(&[&job.name]);
     }
     if let Some(ref url) = config.notify_webhook {
-        notifier::notify_webhook(
-            url,
-            serde_json::json!({
-                "event": "job.started", "job": job.name, "id": job.id.to_string()[..8],
-            }),
-        );
+        notifier::send_webhook_event(url, &job, notifier::WebhookEvent::Started).await;
     }
 
     if !follow {
@@ -725,20 +720,8 @@ async fn cmd_run(
                 notifier::notify(&job, &result);
             }
             if let Some(ref url) = config.notify_webhook {
-                let artifact = job
-                    .open_artifact
-                    .as_ref()
-                    .and_then(|a| boo::job::resolve_artifact(&job.working_dir, a))
-                    .map(|p| p.to_string_lossy().to_string());
-                notifier::notify_webhook(
-                    url,
-                    serde_json::json!({
-                        "event": if result.success { "job.completed" } else { "job.failed" },
-                        "job": job.name, "id": job.id.to_string()[..8],
-                        "success": result.success, "duration_secs": result.duration_secs,
-                        "artifact": artifact,
-                    }),
-                );
+                notifier::send_webhook_event(url, &job, notifier::WebhookEvent::Finished(&result))
+                    .await;
             }
             if follow {
                 if let Some(ref response) = result.response {
@@ -778,13 +761,12 @@ async fn cmd_run(
                 notifier::notify_error(&job, &e.to_string());
             }
             if let Some(ref url) = config.notify_webhook {
-                notifier::notify_webhook(
+                notifier::send_webhook_event(
                     url,
-                    serde_json::json!({
-                        "event": "job.failed", "job": job.name, "id": job.id.to_string()[..8],
-                        "error": e.to_string(),
-                    }),
-                );
+                    &job,
+                    notifier::WebhookEvent::Errored(&e.to_string()),
+                )
+                .await;
             }
             if follow {
                 eprintln!("{e}");
