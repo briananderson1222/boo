@@ -1,0 +1,96 @@
+name: Kiro Review (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      agent:
+        description: Local Kiro agent name to run.
+        required: true
+        type: string
+      review-kind:
+        description: Human-readable review mode included in the Kiro prompt.
+        required: true
+        type: string
+      strict:
+        description: Fail when REVIEW_DATA is missing, malformed, or violates the normalized schema.
+        required: false
+        type: string
+        default: "false"
+      post-mode:
+        description: >-
+          How to publish the review: "pr-comment" posts a PR review comment,
+          "artifact" uploads the review as a workflow artifact, and
+          "artifact-fail-on-critical" uploads the artifact and then fails the
+          job if any CRITICAL findings were reported.
+        required: true
+        type: string
+      artifact-name:
+        description: Artifact name used when post-mode uploads an artifact.
+        required: false
+        type: string
+        default: kiro-review
+    secrets:
+      KIRO_API_KEY:
+        required: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted workflow code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: trusted
+
+      - name: Checkout pull request code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: workspace
+
+      - name: Check trusted recipe availability
+        id: recipe
+        run: |
+          if [[ -f trusted/.github/actions/kiro-review/action.yml ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Kiro recipe is not present on the base branch yet; skipping first-install PR run."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Kiro review
+        if: steps.recipe.outputs.available == 'true'
+        id: kiro
+        uses: ./trusted/.github/actions/kiro-review
+        env:
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+        with:
+          agent: ${{ inputs.agent }}
+          base-ref: origin/${{ github.base_ref }}
+          review-kind: ${{ inputs.review-kind }}
+          strict: ${{ inputs.strict }}
+          workdir: workspace
+
+      - name: Post PR review
+        if: steps.recipe.outputs.available == 'true' && inputs.post-mode == 'pr-comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ./trusted/scripts/post-pr-review.sh "${{ steps.kiro.outputs.review_markdown_path }}"
+
+      - name: Upload review artifact
+        if: >-
+          steps.recipe.outputs.available == 'true' &&
+          (inputs.post-mode == 'artifact' || inputs.post-mode == 'artifact-fail-on-critical')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: |
+            ${{ steps.kiro.outputs.review_markdown_path }}
+            ${{ steps.kiro.outputs.review_json_path }}
+
+      - name: Fail on critical findings
+        if: steps.recipe.outputs.available == 'true' && inputs.post-mode == 'artifact-fail-on-critical'
+        run: node trusted/scripts/fail-on-critical.mjs "${{ steps.kiro.outputs.review_json_path }}"
