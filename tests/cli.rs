@@ -16,8 +16,21 @@ fn boo_isolated(dir: &std::path::Path) -> Command {
     let mut cmd = boo();
     cmd.env("BOO_HOME", dir.join(".boo"))
         .env("HOME", dir)
-        .env("USERPROFILE", dir);
+        .env("USERPROFILE", dir)
+        .env("BOO_NO_NOTIFY", "1");
     cmd
+}
+
+/// Point kiro_cli_path at `echo` so `boo run` exercises the real executor
+/// end-to-end without needing kiro-cli installed.
+fn write_echo_config(dir: &std::path::Path) {
+    let boo_home = dir.join(".boo");
+    std::fs::create_dir_all(&boo_home).unwrap();
+    std::fs::write(
+        boo_home.join("config.json"),
+        r#"{"kiro_cli_path":"echo","default_timeout_secs":30,"max_log_runs":10,"heartbeat_secs":60}"#,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -435,6 +448,73 @@ fn test_edit_rejects_conflicting_schedules() {
         ])
         .assert()
         .failure();
+}
+
+#[test]
+fn test_run_end_to_end_saves_record_and_response() {
+    let dir = tempfile::tempdir().unwrap();
+    write_echo_config(dir.path());
+    boo_isolated(dir.path())
+        .args([
+            "add",
+            "--name",
+            "e2e",
+            "--every",
+            "1h",
+            "--prompt",
+            "hello",
+            "--dir",
+            &tmp(),
+        ])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .args(["run", "e2e"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("success=true"));
+    // A run record must now exist (regression guard for the failed-run and
+    // manual-run bookkeeping)
+    boo_isolated(dir.path())
+        .args(["logs", "e2e"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No run records").not());
+}
+
+#[test]
+fn test_url_run_requires_opt_in() {
+    let dir = tempfile::tempdir().unwrap();
+    write_echo_config(dir.path());
+    boo_isolated(dir.path())
+        .args([
+            "add",
+            "--name",
+            "urlgate",
+            "--every",
+            "1h",
+            "--command",
+            "echo hi",
+            "--dir",
+            &tmp(),
+        ])
+        .assert()
+        .success();
+    // Without opt-in, boo://run is rejected
+    boo_isolated(dir.path())
+        .arg("boo://run/urlgate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not URL-triggerable"));
+    // After opt-in it is accepted
+    boo_isolated(dir.path())
+        .args(["edit", "urlgate", "--allow-url-trigger", "true"])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .arg("boo://run/urlgate")
+        .assert()
+        .success();
 }
 
 #[test]
