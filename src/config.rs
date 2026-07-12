@@ -80,9 +80,12 @@ impl Config {
         let path = Self::path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
+            restrict_dir_permissions(parent);
         }
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, json)?;
+        std::fs::write(&path, json)?;
+        // Config may hold webhook URLs, which are bearer-secret-equivalent
+        restrict_file_permissions(&path);
         Ok(())
     }
 
@@ -91,8 +94,33 @@ impl Config {
     }
 }
 
-/// Returns ~/.boo/ directory path
+/// Restrict a directory to owner-only (0700) on Unix. No-op elsewhere.
+pub fn restrict_dir_permissions(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700));
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+/// Restrict a file to owner-only (0600) on Unix. No-op elsewhere.
+pub fn restrict_file_permissions(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+/// Returns the boo data directory: $BOO_HOME if set, else ~/.boo/
 pub fn boo_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("BOO_HOME") {
+        return PathBuf::from(dir);
+    }
     dirs::home_dir()
         .expect("Could not determine home directory")
         .join(".boo")

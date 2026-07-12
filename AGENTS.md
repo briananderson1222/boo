@@ -59,12 +59,13 @@ tests/
 - **Working directory validation**: `boo add` verifies dir exists
 - **PID alive check**: `kill(pid, 0)` on Unix
 - **Terminal handoff**: `boo run --interactive --new-window` opens a new terminal window via `open_terminal_run`, shared `open_terminal_with_command` helper used by both resume and run
-- **Reserved fields**: `Job.timezone` (stored, not yet used by cron_eval — always UTC) and `Job.allow_overlap` (checked by scheduler, but no CLI flag to enable)
+- **Timezone-aware scheduling**: `Job.timezone` (IANA name) is evaluated by `cron_eval` via croner + chrono-tz, honoring DST; defaults to UTC. Validated at add/edit time.
+- **URL-trigger opt-in**: `Job.allow_url_trigger` gates `boo://run` / `boo://resume`; `Job.allow_overlap` is settable via `--allow-overlap`.
 
 ## Testing Strategy
 
 - **proptest** for property-based testing (serialization roundtrips, cron evaluation invariants, store consistency)
-- **tempfile** for test isolation (no tests touch real `~/.boo`)
+- **tempfile + `BOO_HOME`** for test isolation. `BOO_HOME` overrides the data dir; `boo_isolated` sets it (plus HOME/USERPROFILE). Note `dirs::home_dir()` ignores HOME/USERPROFILE on Windows, so `BOO_HOME` is what makes the suite hermetic there. A few older tests still run against the real `~/.boo` and only assert command success.
 - **assert_cmd** for CLI integration tests (schedule types, mutual exclusion, flags, duration parsing, full lifecycle)
 - **MockClock** for deterministic scheduler tests (overdue detection for cron/at/every, delete-after-run, skip disabled)
 - **`echo` as kiro-cli substitute** in tests
@@ -77,14 +78,16 @@ tests/
 | `tokio` | Async runtime, timers, subprocess |
 | `clap` | CLI argument parsing (derive) |
 | `serde` / `serde_json` | JSON persistence |
-| `chrono` | Time handling |
+| `chrono` / `chrono-tz` | Time and IANA-timezone handling |
 | `uuid` | Job IDs |
+| `reqwest` (rustls) | Webhook HTTP(S) delivery |
 | `user-notify` | Native desktop notifications (cross-platform) |
 | `glob` | Glob pattern matching for artifact resolution |
-| `fs2` | File locking |
 | `dirs` | Cross-platform config directories |
-| `libc` | PID alive check (Unix only) |
+| `libc` | PID alive check + process-group signals (Unix only) |
 | `thiserror` | Error type derivation |
+
+Job-store file locking uses the standard library's `File::lock` (Rust 1.89+); the old `fs2` dependency was dropped. `Cargo.lock` is committed.
 
 Dev dependencies: `proptest`, `tempfile`, `assert_cmd`, `predicates`
 
@@ -100,7 +103,7 @@ Dev dependencies: `proptest`, `tempfile`, `assert_cmd`, `predicates`
 - **DRY**: consolidate shared logic into `lib.rs` or shared functions. Check for existing implementations before writing new code. If similar logic exists in multiple places, refactor into a single source of truth.
 - **Every code change must include corresponding tests.** No exceptions. If a feature is added or a bug is fixed, a test proving it works must accompany the change.
 - **Version bump after release**: After tagging a release, immediately bump `Cargo.toml` version to the next minor (e.g. 0.2.0 → 0.3.0) so the working tree always reflects in-progress work.
-- **Changelog**: Update `CHANGELOG.md` when tagging a release. The annotated tag message should match the changelog entry. GitHub release notes are populated from the tag message.
+- **Changelog**: Update `CHANGELOG.md` when tagging a release. GitHub release notes are auto-generated from merged PRs (`generate_release_notes: true` in `release.yml`).
 
 ## Maintaining This File
 

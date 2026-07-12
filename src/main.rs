@@ -25,67 +25,136 @@ struct Cli {
     command: Commands,
 }
 
+/// Arguments for `boo add`. Grouped into a struct (rather than 20 positional
+/// function args) so two adjacent same-typed fields can't be silently swapped.
+#[derive(clap::Args)]
+struct AddArgs {
+    #[arg(long)]
+    name: String,
+    /// Cron expression (e.g. "0 9 * * 1-5")
+    #[arg(long, group = "schedule")]
+    cron: Option<String>,
+    /// One-shot time (ISO 8601 or natural language like "tomorrow 9am")
+    #[arg(long, group = "schedule")]
+    at: Option<String>,
+    /// Interval (e.g. "30m", "6h", "1d")
+    #[arg(long, group = "schedule")]
+    every: Option<String>,
+    #[arg(long)]
+    prompt: Option<String>,
+    /// Raw shell command (shortcut for --runner shell)
+    #[arg(long, conflicts_with = "prompt")]
+    command: Option<String>,
+    #[arg(long)]
+    dir: Option<PathBuf>,
+    #[arg(long)]
+    agent: Option<String>,
+    #[arg(long)]
+    model: Option<String>,
+    #[arg(long)]
+    timeout: Option<u64>,
+    /// IANA timezone for cron/at evaluation (e.g. "America/New_York").
+    /// Defaults to UTC.
+    #[arg(long)]
+    timezone: Option<String>,
+    /// Auto-delete job after successful execution
+    #[arg(long)]
+    delete_after_run: bool,
+    /// File to open when notification is clicked (relative to working dir)
+    #[arg(long)]
+    open_artifact: Option<String>,
+    /// Max retry attempts on failure
+    #[arg(long, default_value = "0")]
+    retry: u32,
+    /// Seconds between retries
+    #[arg(long, default_value = "60")]
+    retry_delay: u64,
+    /// Send a start notification when this job begins
+    #[arg(long)]
+    notify_start: bool,
+    /// Pass --trust-all-tools to kiro-cli
+    #[arg(long)]
+    trust_all_tools: bool,
+    /// Trust only these tools (comma-separated). Example: --trust-tools=write,shell
+    #[arg(long)]
+    trust_tools: Option<String>,
+    /// Runner type: kiro (default), shell, or future CLI names
+    #[arg(long)]
+    runner: Option<String>,
+    /// Human-readable description of what this job does
+    #[arg(long)]
+    description: Option<String>,
+    /// Allow this job to fire again while a previous run is still going
+    #[arg(long)]
+    allow_overlap: bool,
+    /// Allow boo:// links to run/resume this job (any web page can fire
+    /// such links — only enable for jobs you'd trust a link click to run)
+    #[arg(long)]
+    allow_url_trigger: bool,
+}
+
+/// Arguments for `boo edit`. Every field is optional; only supplied fields
+/// change. Grouped for the same reason as AddArgs.
+#[derive(clap::Args)]
+struct EditArgs {
+    target: String,
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long, group = "schedule")]
+    cron: Option<String>,
+    #[arg(long, group = "schedule")]
+    at: Option<String>,
+    #[arg(long, group = "schedule")]
+    every: Option<String>,
+    #[arg(long)]
+    prompt: Option<String>,
+    #[arg(long)]
+    command: Option<String>,
+    #[arg(long)]
+    dir: Option<PathBuf>,
+    #[arg(long)]
+    agent: Option<String>,
+    #[arg(long)]
+    model: Option<String>,
+    #[arg(long)]
+    timeout: Option<u64>,
+    #[arg(long)]
+    timezone: Option<String>,
+    #[arg(long)]
+    open_artifact: Option<String>,
+    #[arg(long)]
+    retry: Option<u32>,
+    #[arg(long)]
+    retry_delay: Option<u64>,
+    #[arg(long)]
+    notify_start: Option<bool>,
+    #[arg(long)]
+    trust_all_tools: Option<bool>,
+    /// Trust only these tools (comma-separated, or empty string to clear)
+    #[arg(long)]
+    trust_tools: Option<String>,
+    #[arg(long)]
+    runner: Option<String>,
+    #[arg(long)]
+    description: Option<String>,
+    /// Auto-delete job after successful execution (true/false)
+    #[arg(long)]
+    delete_after_run: Option<bool>,
+    /// Allow overlapping runs (true/false)
+    #[arg(long)]
+    allow_overlap: Option<bool>,
+    /// Allow boo:// links to run/resume this job (true/false)
+    #[arg(long)]
+    allow_url_trigger: Option<bool>,
+}
+
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 enum Commands {
     /// Start the scheduler daemon
     Daemon,
     /// Add a new scheduled job
-    Add {
-        #[arg(long)]
-        name: String,
-        /// Cron expression (e.g. "0 9 * * 1-5")
-        #[arg(long, group = "schedule")]
-        cron: Option<String>,
-        /// One-shot time (ISO 8601 or natural language like "tomorrow 9am")
-        #[arg(long, group = "schedule")]
-        at: Option<String>,
-        /// Interval (e.g. "30m", "6h", "1d")
-        #[arg(long, group = "schedule")]
-        every: Option<String>,
-        #[arg(long)]
-        prompt: Option<String>,
-        /// Raw shell command (shortcut for --runner shell)
-        #[arg(long, conflicts_with = "prompt")]
-        command: Option<String>,
-        #[arg(long)]
-        dir: Option<PathBuf>,
-        #[arg(long)]
-        agent: Option<String>,
-        #[arg(long)]
-        model: Option<String>,
-        #[arg(long)]
-        timeout: Option<u64>,
-        #[arg(long)]
-        timezone: Option<String>,
-        /// Auto-delete job after successful execution
-        #[arg(long)]
-        delete_after_run: bool,
-        /// File to open when notification is clicked (relative to working dir)
-        #[arg(long)]
-        open_artifact: Option<String>,
-        /// Max retry attempts on failure
-        #[arg(long, default_value = "0")]
-        retry: u32,
-        /// Seconds between retries
-        #[arg(long, default_value = "60")]
-        retry_delay: u64,
-        /// Send a start notification when this job begins
-        #[arg(long)]
-        notify_start: bool,
-        /// Pass --trust-all-tools to kiro-cli
-        #[arg(long)]
-        trust_all_tools: bool,
-        /// Trust only these tools (comma-separated). Example: --trust-tools=write,shell
-        #[arg(long)]
-        trust_tools: Option<String>,
-        /// Runner type: kiro (default), shell, or future CLI names
-        #[arg(long)]
-        runner: Option<String>,
-        /// Human-readable description of what this job does
-        #[arg(long)]
-        description: Option<String>,
-    },
+    Add(AddArgs),
     /// Remove a job by ID or name
     Remove {
         target: String,
@@ -167,48 +236,7 @@ enum Commands {
         format: String,
     },
     /// Edit an existing job's settings
-    Edit {
-        target: String,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        cron: Option<String>,
-        #[arg(long)]
-        at: Option<String>,
-        #[arg(long)]
-        every: Option<String>,
-        #[arg(long)]
-        prompt: Option<String>,
-        #[arg(long)]
-        command: Option<String>,
-        #[arg(long)]
-        dir: Option<PathBuf>,
-        #[arg(long)]
-        agent: Option<String>,
-        #[arg(long)]
-        model: Option<String>,
-        #[arg(long)]
-        timeout: Option<u64>,
-        #[arg(long)]
-        timezone: Option<String>,
-        #[arg(long)]
-        open_artifact: Option<String>,
-        #[arg(long)]
-        retry: Option<u32>,
-        #[arg(long)]
-        retry_delay: Option<u64>,
-        #[arg(long)]
-        notify_start: Option<bool>,
-        #[arg(long)]
-        trust_all_tools: Option<bool>,
-        /// Trust only these tools (comma-separated, or empty string to clear)
-        #[arg(long)]
-        trust_tools: Option<String>,
-        #[arg(long)]
-        runner: Option<String>,
-        #[arg(long)]
-        description: Option<String>,
-    },
+    Edit(EditArgs),
     /// Show only currently running jobs
     Running {
         /// Output format: table (default), json
@@ -325,23 +353,31 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
 
     match parts.first().copied() {
         Some("resume") => {
-            let target = parts.get(1).copied();
             let prompt = params.get("prompt").map(|s| s.as_str());
             let previous = params.get("previous").is_some_and(|v| v == "true");
+            // A URL must name a specific job so we can enforce its opt-in.
+            // The target-less `boo resume` picker is a CLI-only affordance:
+            // allowing it from a link would let any web page inject a prompt
+            // into an agent session with no job to vet.
+            let target = parts.get(1).copied().ok_or_else(|| {
+                boo::error::BooError::Other(
+                    "boo://resume requires a job name (boo://resume/<job>)".into(),
+                )
+            })?;
+            let store = JobStore::new()?;
+            let job = resolve_job(&store, target)?;
+            require_url_trigger(&job)?;
             // URL scheme launches without a terminal — need to open one
-            if let Some(t) = target {
-                let store = JobStore::new()?;
-                let _ = resolve_job(&store, t)?; // validate job exists
-                boo::notifier::open_terminal_resume(t, prompt, previous);
-                Ok(())
-            } else {
-                cmd_resume(target, prompt, previous)
-            }
+            boo::notifier::open_terminal_resume(target, prompt, previous);
+            Ok(())
         }
         Some("run") => {
             let target = parts
                 .get(1)
                 .ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
+            let store = JobStore::new()?;
+            let job = resolve_job(&store, target)?;
+            require_url_trigger(&job)?;
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -380,6 +416,22 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
     }
 }
 
+/// Guard boo:// run/resume actions: any web page can open such a link, so a
+/// job must explicitly opt in via `allow_url_trigger` before a link click can
+/// execute it or inject a prompt into its agent session.
+fn require_url_trigger(job: &Job) -> boo::error::Result<()> {
+    if job.allow_url_trigger {
+        Ok(())
+    } else {
+        Err(boo::error::BooError::Other(format!(
+            "Job '{}' is not URL-triggerable. Enable it with:\n  \
+             boo edit '{}' --allow-url-trigger true\n\
+             (only for jobs you'd trust a link click to run)",
+            job.name, job.name
+        )))
+    }
+}
+
 fn urldecode(s: &str) -> String {
     let mut bytes = Vec::with_capacity(s.len());
     let mut chars = s.bytes();
@@ -402,103 +454,13 @@ fn urldecode(s: &str) -> String {
 async fn run(cli: Cli) -> boo::error::Result<()> {
     match cli.command {
         Commands::Daemon => unreachable!("handled before tokio runtime"),
-        Commands::Add {
-            name,
-            cron,
-            at,
-            every,
-            prompt,
-            command,
-            dir,
-            agent,
-            model,
-            timeout,
-            timezone,
-            delete_after_run,
-            open_artifact,
-            retry,
-            retry_delay,
-            notify_start,
-            trust_all_tools,
-            trust_tools,
-            runner,
-            description,
-        } => {
-            cmd_add(
-                name,
-                cron,
-                at,
-                every,
-                prompt,
-                command,
-                dir,
-                agent,
-                model,
-                timeout,
-                timezone,
-                delete_after_run,
-                open_artifact,
-                retry,
-                retry_delay,
-                notify_start,
-                trust_all_tools,
-                trust_tools,
-                runner,
-                description,
-            )
-            .await
-        }
+        Commands::Add(args) => cmd_add(args).await,
         Commands::Remove {
             target,
             delete_logs,
             keep_logs,
         } => cmd_remove(&target, delete_logs, keep_logs),
-        Commands::Edit {
-            target,
-            name,
-            cron,
-            at,
-            every,
-            prompt,
-            command,
-            dir,
-            agent,
-            model,
-            timeout,
-            timezone,
-            open_artifact,
-            retry,
-            retry_delay,
-            notify_start,
-            trust_all_tools,
-            trust_tools,
-            runner,
-            description,
-        } => {
-            cmd_edit(
-                &target,
-                name,
-                cron,
-                at,
-                every,
-                prompt,
-                command,
-                dir,
-                agent,
-                model,
-                timeout,
-                timezone,
-                open_artifact,
-                retry,
-                retry_delay,
-                notify_start,
-                trust_all_tools,
-                trust_tools,
-                runner,
-                description,
-            )
-            .await
-        }
+        Commands::Edit(args) => cmd_edit(args).await,
         Commands::List { format } => cmd_list(&format),
         Commands::Enable { target } => cmd_set_enabled(&target, true),
         Commands::Disable { target } => cmd_set_enabled(&target, false),
@@ -551,7 +513,6 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
 /// Notification service must run on main thread (macOS requirement).
 /// Daemon runs tokio on a background thread.
 fn cmd_daemon_blocking() -> boo::error::Result<()> {
-    use fs2::FileExt;
     use std::fs::File;
 
     let boo_dir = boo::config::boo_dir();
@@ -560,7 +521,7 @@ fn cmd_daemon_blocking() -> boo::error::Result<()> {
     let pid_path = boo_dir.join("daemon.pid");
 
     let lock_file = File::create(&lock_path)?;
-    lock_file.try_lock_exclusive().map_err(|_| {
+    lock_file.try_lock().map_err(|_| {
         let existing_pid = std::fs::read_to_string(&pid_path)
             .ok()
             .and_then(|s| s.trim().parse::<u32>().ok())
@@ -586,7 +547,22 @@ fn cmd_daemon_blocking() -> boo::error::Result<()> {
         rt.block_on(async {
             let s2 = s.clone();
             tokio::spawn(async move {
-                let _ = tokio::signal::ctrl_c().await;
+                // Handle both Ctrl-C and SIGTERM (sent by launchctl unload /
+                // systemctl stop) so the graceful drain + pid cleanup run.
+                #[cfg(unix)]
+                {
+                    use tokio::signal::unix::{signal, SignalKind};
+                    let mut term =
+                        signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {}
+                        _ = term.recv() => {}
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = tokio::signal::ctrl_c().await;
+                }
                 s2.trigger_shutdown();
             });
             s.run().await;
@@ -645,12 +621,7 @@ async fn cmd_run(
         notifier::notify_start(&[&job.name]);
     }
     if let Some(ref url) = config.notify_webhook {
-        notifier::notify_webhook(
-            url,
-            serde_json::json!({
-                "event": "job.started", "job": job.name, "id": job.id.to_string()[..8],
-            }),
-        );
+        notifier::send_webhook_event(url, &job, notifier::WebhookEvent::Started).await;
     }
 
     if !follow {
@@ -665,17 +636,22 @@ async fn cmd_run(
         now.timestamp_subsec_millis()
     ));
 
-    // Track active run
-    let active = boo::store::ActiveRun {
-        job_id: job.id,
-        job_name: job.name.clone(),
-        pid: process::id(),
-        started_at: now,
-        manual: true,
+    // Track active run with the real child PID (so kill/wait target the job,
+    // not this CLI process)
+    let (active_id, active_name) = (job.id, job.name.clone());
+    let on_spawn = move |pid: u32| {
+        if let Ok(s) = JobStore::new() {
+            let _ = s.write_active_run(&boo::store::ActiveRun {
+                job_id: active_id,
+                job_name: active_name.clone(),
+                pid,
+                started_at: now,
+                manual: true,
+            });
+        }
     };
-    let _ = store.write_active_run(&active);
 
-    match executor::execute_job(&job, &config, &log_path).await {
+    match executor::execute_job(&job, &config, &log_path, Some(&on_spawn)).await {
         Ok(result) => {
             store.remove_active_run(job.id);
             let record = boo::job::RunRecord {
@@ -695,20 +671,8 @@ async fn cmd_run(
                 notifier::notify(&job, &result);
             }
             if let Some(ref url) = config.notify_webhook {
-                let artifact = job
-                    .open_artifact
-                    .as_ref()
-                    .and_then(|a| boo::job::resolve_artifact(&job.working_dir, a))
-                    .map(|p| p.to_string_lossy().to_string());
-                notifier::notify_webhook(
-                    url,
-                    serde_json::json!({
-                        "event": if result.success { "job.completed" } else { "job.failed" },
-                        "job": job.name, "id": job.id.to_string()[..8],
-                        "success": result.success, "duration_secs": result.duration_secs,
-                        "artifact": artifact,
-                    }),
-                );
+                notifier::send_webhook_event(url, &job, notifier::WebhookEvent::Finished(&result))
+                    .await;
             }
             if follow {
                 if let Some(ref response) = result.response {
@@ -730,17 +694,30 @@ async fn cmd_run(
         }
         Err(e) => {
             store.remove_active_run(job.id);
+            // Failed manual runs should be visible in boo logs/stats too
+            let record = boo::job::RunRecord {
+                job_id: job.id,
+                job_name: job.name.clone(),
+                fired_at: now,
+                scheduled_for: now,
+                missed_count: 0,
+                duration_secs: (Utc::now() - now).num_milliseconds() as f64 / 1000.0,
+                exit_code: None,
+                success: false,
+                output_path: log_path.clone(),
+                manual: true,
+            };
+            let _ = store.append_run_record(&record);
             if !no_notify {
                 notifier::notify_error(&job, &e.to_string());
             }
             if let Some(ref url) = config.notify_webhook {
-                notifier::notify_webhook(
+                notifier::send_webhook_event(
                     url,
-                    serde_json::json!({
-                        "event": "job.failed", "job": job.name, "id": job.id.to_string()[..8],
-                        "error": e.to_string(),
-                    }),
-                );
+                    &job,
+                    notifier::WebhookEvent::Errored(&e.to_string()),
+                )
+                .await;
             }
             if follow {
                 eprintln!("{e}");
@@ -751,29 +728,31 @@ async fn cmd_run(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn cmd_add(
-    name: String,
-    cron: Option<String>,
-    at: Option<String>,
-    every: Option<String>,
-    prompt: Option<String>,
-    command: Option<String>,
-    dir: Option<PathBuf>,
-    agent: Option<String>,
-    model: Option<String>,
-    timeout: Option<u64>,
-    timezone: Option<String>,
-    delete_after_run: bool,
-    open_artifact: Option<String>,
-    retry: u32,
-    retry_delay: u64,
-    notify_start: bool,
-    trust_all_tools: bool,
-    trust_tools: Option<String>,
-    runner: Option<String>,
-    description: Option<String>,
-) -> boo::error::Result<()> {
+async fn cmd_add(args: AddArgs) -> boo::error::Result<()> {
+    let AddArgs {
+        name,
+        cron,
+        at,
+        every,
+        prompt,
+        command,
+        dir,
+        agent,
+        model,
+        timeout,
+        timezone,
+        delete_after_run,
+        open_artifact,
+        retry,
+        retry_delay,
+        notify_start,
+        trust_all_tools,
+        trust_tools,
+        runner,
+        description,
+        allow_overlap,
+        allow_url_trigger,
+    } = args;
     if prompt.is_none() && command.is_none() {
         return Err(boo::error::BooError::Other(
             "Must specify --prompt or --command".into(),
@@ -788,17 +767,20 @@ async fn cmd_add(
         ));
     }
 
-    let dir = dir.unwrap_or_else(|| {
-        let ws = boo::config::boo_dir().join("workspace").join(&name);
-        let _ = std::fs::create_dir_all(&ws);
-        ws
-    });
-    if !dir.exists() {
-        return Err(boo::error::BooError::Other(format!(
-            "Working directory does not exist: {}",
-            dir.display()
-        )));
-    }
+    // A custom dir must already exist. The default workspace dir is only
+    // created after all validation passes, so a failed add leaves nothing.
+    let (dir, create_default_workspace) = match dir {
+        Some(d) => {
+            if !d.exists() {
+                return Err(boo::error::BooError::Other(format!(
+                    "Working directory does not exist: {}",
+                    d.display()
+                )));
+            }
+            (d, false)
+        }
+        None => (boo::config::boo_dir().join("workspace").join(&name), true),
+    };
 
     let store = JobStore::new()?;
     if store.load_jobs()?.iter().any(|j| j.name == name) {
@@ -806,6 +788,29 @@ async fn cmd_add(
             "Job with name '{}' already exists",
             name
         )));
+    }
+
+    // Validate the schedule before creating anything on disk
+    let parsed_at = match &at {
+        Some(at_str) => Some(parse_at_time(at_str).await?),
+        None => None,
+    };
+    let parsed_every = match &every {
+        Some(every_str) => Some(parse_duration(every_str)?),
+        None => None,
+    };
+    if let Some(ref tz) = timezone {
+        cron_eval::parse_timezone(tz)?;
+    }
+    if let Some(ref r) = runner {
+        executor::validate_runner(r)?;
+    }
+    if let Some(ref cron_str) = cron {
+        cron_eval::next_occurrence_tz(cron_str, Utc::now(), timezone.as_deref())?;
+    }
+
+    if create_default_workspace {
+        std::fs::create_dir_all(&dir)?;
     }
 
     let prompt_str = prompt.as_deref().unwrap_or("");
@@ -828,15 +833,15 @@ async fn cmd_add(
     };
     job.command = command;
     job.description = description;
+    job.allow_overlap = allow_overlap;
+    job.allow_url_trigger = allow_url_trigger;
 
     if let Some(cron_str) = cron {
-        cron_eval::next_occurrence(&cron_str, Utc::now())?;
         job.cron_expr = cron_str;
-    } else if let Some(at_str) = at {
-        let at_time = parse_at_time(&at_str).await?;
+    } else if let Some(at_time) = parsed_at {
         job.at_time = Some(at_time);
-    } else if let Some(every_str) = every {
-        job.every_secs = Some(parse_duration(&every_str)?);
+    } else if let Some(every_secs) = parsed_every {
+        job.every_secs = Some(every_secs);
     }
 
     store.add_job(job.clone())?;
@@ -884,31 +889,34 @@ fn cmd_remove(target: &str, delete_logs: bool, keep_logs: bool) -> boo::error::R
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn cmd_edit(
-    target: &str,
-    name: Option<String>,
-    cron: Option<String>,
-    at: Option<String>,
-    every: Option<String>,
-    prompt: Option<String>,
-    command: Option<String>,
-    dir: Option<PathBuf>,
-    agent: Option<String>,
-    model: Option<String>,
-    timeout: Option<u64>,
-    timezone: Option<String>,
-    open_artifact: Option<String>,
-    retry: Option<u32>,
-    retry_delay: Option<u64>,
-    notify_start: Option<bool>,
-    trust_all_tools: Option<bool>,
-    trust_tools: Option<String>,
-    runner: Option<String>,
-    description: Option<String>,
-) -> boo::error::Result<()> {
+async fn cmd_edit(args: EditArgs) -> boo::error::Result<()> {
+    let EditArgs {
+        target,
+        name,
+        cron,
+        at,
+        every,
+        prompt,
+        command,
+        dir,
+        agent,
+        model,
+        timeout,
+        timezone,
+        open_artifact,
+        retry,
+        retry_delay,
+        notify_start,
+        trust_all_tools,
+        trust_tools,
+        runner,
+        description,
+        delete_after_run,
+        allow_overlap,
+        allow_url_trigger,
+    } = args;
     let store = JobStore::new()?;
-    let mut job = resolve_job(&store, target)?;
+    let mut job = resolve_job(&store, &target)?;
     let mut changes = Vec::new();
 
     if let Some(ref new_name) = name {
@@ -932,22 +940,28 @@ async fn cmd_edit(
         job.name = new_name.clone();
         changes.push(format!("name → {new_name}"));
     }
+    // Editing the schedule resets last_run: an at-job must be able to fire
+    // again (it only fires while last_run is unset), while cron/every jobs
+    // restart from now so the change doesn't trigger a surprise catch-up run.
     if let Some(v) = cron {
         cron_eval::next_occurrence(&v, Utc::now())?;
         job.cron_expr = v.clone();
         job.at_time = None;
         job.every_secs = None;
+        job.last_run = Some(Utc::now());
         changes.push(format!("cron → {v}"));
     } else if let Some(v) = at {
         let at_time = parse_at_time(&v).await?;
         job.at_time = Some(at_time);
         job.cron_expr = String::new();
         job.every_secs = None;
+        job.last_run = None;
         changes.push(format!("at → {at_time}"));
     } else if let Some(v) = every {
         job.every_secs = Some(parse_duration(&v)?);
         job.cron_expr = String::new();
         job.at_time = None;
+        job.last_run = Some(Utc::now());
         changes.push(format!("every → {v}"));
     }
     if let Some(v) = prompt {
@@ -959,6 +973,12 @@ async fn cmd_edit(
         changes.push(format!("command → {v}"));
     }
     if let Some(v) = dir {
+        if !v.exists() {
+            return Err(boo::error::BooError::Other(format!(
+                "Working directory does not exist: {}",
+                v.display()
+            )));
+        }
         job.working_dir = v.clone();
         changes.push(format!("dir → {}", v.display()));
     }
@@ -975,6 +995,7 @@ async fn cmd_edit(
         changes.push(format!("timeout → {v}s"));
     }
     if let Some(v) = timezone {
+        cron_eval::parse_timezone(&v)?;
         job.timezone = Some(v.clone());
         changes.push(format!("timezone → {v}"));
     }
@@ -1008,12 +1029,25 @@ async fn cmd_edit(
         }
     }
     if let Some(v) = runner {
+        executor::validate_runner(&v)?;
         job.runner = Some(v.clone());
         changes.push(format!("runner → {v}"));
     }
     if let Some(v) = description {
         job.description = Some(v.clone());
         changes.push(format!("description → {v}"));
+    }
+    if let Some(v) = delete_after_run {
+        job.delete_after_run = v;
+        changes.push(format!("delete_after_run → {v}"));
+    }
+    if let Some(v) = allow_overlap {
+        job.allow_overlap = v;
+        changes.push(format!("allow_overlap → {v}"));
+    }
+    if let Some(v) = allow_url_trigger {
+        job.allow_url_trigger = v;
+        changes.push(format!("allow_url_trigger → {v}"));
     }
 
     if changes.is_empty() {
@@ -1056,7 +1090,13 @@ fn cmd_list(format: &str) -> boo::error::Result<()> {
                 "disabled".into()
             } else {
                 cron_eval::next_fire_time(job, now)
-                    .map(|t| t.format("%m-%d %H:%M UTC").to_string())
+                    .map(|t| {
+                        if t < now {
+                            "overdue".to_string()
+                        } else {
+                            t.format("%m-%d %H:%M UTC").to_string()
+                        }
+                    })
                     .unwrap_or_else(|| "done".into())
             };
             let last_run = job
@@ -1442,29 +1482,7 @@ fn cmd_kill(target: &str) -> boo::error::Result<()> {
         }
         Some(run) => {
             println!("Killing '{}' (pid {})...", run.job_name, run.pid);
-            #[cfg(unix)]
-            {
-                // Kill the process group to get all descendants
-                unsafe {
-                    if libc::killpg(run.pid as i32, libc::SIGTERM) != 0 {
-                        // Fallback to direct kill
-                        libc::kill(run.pid as i32, libc::SIGKILL);
-                    }
-                }
-                // Give it a moment, then force kill if still alive
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                if boo::is_pid_alive(run.pid) {
-                    unsafe {
-                        libc::killpg(run.pid as i32, libc::SIGKILL);
-                    }
-                }
-            }
-            #[cfg(windows)]
-            {
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/PID", &run.pid.to_string(), "/T", "/F"])
-                    .output();
-            }
+            boo::kill_process_group(run.pid, true);
             store.remove_active_run(job.id);
             println!("Killed.");
             Ok(())
@@ -1477,20 +1495,12 @@ fn cmd_clean(keep_logs: bool, dry_run: bool) -> boo::error::Result<()> {
     let jobs = store.load_jobs()?;
     let now = Utc::now();
 
+    // One-shot (at) jobs count as cleanable if they already ran, or if their
+    // time has passed — disabled ones included (they were previously skipped
+    // and lingered forever).
     let done_jobs: Vec<&Job> = jobs
         .iter()
-        .filter(|j| {
-            j.enabled && {
-                // A one-shot is "done" if next_fire is None (already ran) OR
-                // if it's an at_time job whose time has passed (never ran but expired)
-                let next = cron_eval::next_fire_time(j, now);
-                match next {
-                    None => true,
-                    Some(t) if j.at_time.is_some() && t < now => true,
-                    _ => false,
-                }
-            }
-        })
+        .filter(|j| j.at_time.is_some_and(|at| j.last_run.is_some() || at < now))
         .collect();
 
     if done_jobs.is_empty() {
@@ -1500,7 +1510,18 @@ fn cmd_clean(keep_logs: bool, dry_run: bool) -> boo::error::Result<()> {
 
     let label = if dry_run { "Would remove" } else { "Removing" };
     for job in &done_jobs {
-        println!("{}: {} ({})", label, job.name, &job.id.to_string()[..8]);
+        let note = if job.last_run.is_none() && job.enabled {
+            " (expired but never ran — the daemon would still catch it up)"
+        } else {
+            ""
+        };
+        println!(
+            "{}: {} ({}){}",
+            label,
+            job.name,
+            &job.id.to_string()[..8],
+            note
+        );
     }
 
     if dry_run {
@@ -1909,15 +1930,22 @@ fn resolve_job(store: &JobStore, target: &str) -> boo::error::Result<Job> {
 /// Parse a duration string like "30s", "20m", "6h", "1d" into seconds.
 pub fn parse_duration(s: &str) -> boo::error::Result<u64> {
     let s = s.trim();
-    let (num, suffix) = s.split_at(s.len().saturating_sub(1));
+    // chars().last() keeps this safe for multi-byte input like "5µ",
+    // where a byte-based split_at would panic on a char boundary
+    let Some(suffix) = s.chars().last() else {
+        return Err(boo::error::BooError::Other(
+            "Invalid duration: empty. Use e.g. 30m, 6h, 1d".into(),
+        ));
+    };
+    let num = &s[..s.len() - suffix.len_utf8()];
     let n: u64 = num
         .parse()
         .map_err(|_| boo::error::BooError::Other(format!("Invalid duration: {s}")))?;
     match suffix {
-        "s" => Ok(n),
-        "m" => Ok(n * 60),
-        "h" => Ok(n * 3600),
-        "d" => Ok(n * 86400),
+        's' => Ok(n),
+        'm' => Ok(n * 60),
+        'h' => Ok(n * 3600),
+        'd' => Ok(n * 86400),
         _ => Err(boo::error::BooError::Other(format!(
             "Invalid duration suffix: {s}. Use s/m/h/d"
         ))),
@@ -2014,8 +2042,7 @@ fn is_daemon_running(pid_path: &std::path::Path) -> bool {
     // Fallback: if daemon.pid is missing/stale, check if daemon.lock is held
     let lock_path = pid_path.with_file_name("daemon.lock");
     if let Ok(file) = std::fs::File::open(&lock_path) {
-        use fs2::FileExt;
-        if file.try_lock_exclusive().is_err() {
+        if file.try_lock().is_err() {
             return true; // lock held → daemon is running
         }
         let _ = file.unlock();
