@@ -85,6 +85,13 @@ enum Commands {
         /// Human-readable description of what this job does
         #[arg(long)]
         description: Option<String>,
+        /// Allow this job to fire again while a previous run is still going
+        #[arg(long)]
+        allow_overlap: bool,
+        /// Allow boo:// links to run/resume this job (any web page can fire
+        /// such links — only enable for jobs you'd trust a link click to run)
+        #[arg(long)]
+        allow_url_trigger: bool,
     },
     /// Remove a job by ID or name
     Remove {
@@ -171,11 +178,11 @@ enum Commands {
         target: String,
         #[arg(long)]
         name: Option<String>,
-        #[arg(long)]
+        #[arg(long, group = "schedule")]
         cron: Option<String>,
-        #[arg(long)]
+        #[arg(long, group = "schedule")]
         at: Option<String>,
-        #[arg(long)]
+        #[arg(long, group = "schedule")]
         every: Option<String>,
         #[arg(long)]
         prompt: Option<String>,
@@ -208,6 +215,15 @@ enum Commands {
         runner: Option<String>,
         #[arg(long)]
         description: Option<String>,
+        /// Auto-delete job after successful execution (true/false)
+        #[arg(long)]
+        delete_after_run: Option<bool>,
+        /// Allow overlapping runs (true/false)
+        #[arg(long)]
+        allow_overlap: Option<bool>,
+        /// Allow boo:// links to run/resume this job (true/false)
+        #[arg(long)]
+        allow_url_trigger: Option<bool>,
     },
     /// Show only currently running jobs
     Running {
@@ -423,6 +439,8 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
             trust_tools,
             runner,
             description,
+            allow_overlap,
+            allow_url_trigger,
         } => {
             cmd_add(
                 name,
@@ -445,6 +463,8 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
                 trust_tools,
                 runner,
                 description,
+                allow_overlap,
+                allow_url_trigger,
             )
             .await
         }
@@ -474,6 +494,9 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
             trust_tools,
             runner,
             description,
+            delete_after_run,
+            allow_overlap,
+            allow_url_trigger,
         } => {
             cmd_edit(
                 &target,
@@ -496,6 +519,9 @@ async fn run(cli: Cli) -> boo::error::Result<()> {
                 trust_tools,
                 runner,
                 description,
+                delete_after_run,
+                allow_overlap,
+                allow_url_trigger,
             )
             .await
         }
@@ -791,6 +817,8 @@ async fn cmd_add(
     trust_tools: Option<String>,
     runner: Option<String>,
     description: Option<String>,
+    allow_overlap: bool,
+    allow_url_trigger: bool,
 ) -> boo::error::Result<()> {
     if prompt.is_none() && command.is_none() {
         return Err(boo::error::BooError::Other(
@@ -806,17 +834,20 @@ async fn cmd_add(
         ));
     }
 
-    let dir = dir.unwrap_or_else(|| {
-        let ws = boo::config::boo_dir().join("workspace").join(&name);
-        let _ = std::fs::create_dir_all(&ws);
-        ws
-    });
-    if !dir.exists() {
-        return Err(boo::error::BooError::Other(format!(
-            "Working directory does not exist: {}",
-            dir.display()
-        )));
-    }
+    // A custom dir must already exist. The default workspace dir is only
+    // created after all validation passes, so a failed add leaves nothing.
+    let (dir, create_default_workspace) = match dir {
+        Some(d) => {
+            if !d.exists() {
+                return Err(boo::error::BooError::Other(format!(
+                    "Working directory does not exist: {}",
+                    d.display()
+                )));
+            }
+            (d, false)
+        }
+        None => (boo::config::boo_dir().join("workspace").join(&name), true),
+    };
 
     let store = JobStore::new()?;
     if store.load_jobs()?.iter().any(|j| j.name == name) {
@@ -824,6 +855,23 @@ async fn cmd_add(
             "Job with name '{}' already exists",
             name
         )));
+    }
+
+    // Validate the schedule before creating anything on disk
+    let parsed_at = match &at {
+        Some(at_str) => Some(parse_at_time(at_str).await?),
+        None => None,
+    };
+    let parsed_every = match &every {
+        Some(every_str) => Some(parse_duration(every_str)?),
+        None => None,
+    };
+    if let Some(ref cron_str) = cron {
+        cron_eval::next_occurrence(cron_str, Utc::now())?;
+    }
+
+    if create_default_workspace {
+        std::fs::create_dir_all(&dir)?;
     }
 
     let prompt_str = prompt.as_deref().unwrap_or("");
@@ -846,15 +894,15 @@ async fn cmd_add(
     };
     job.command = command;
     job.description = description;
+    job.allow_overlap = allow_overlap;
+    job.allow_url_trigger = allow_url_trigger;
 
     if let Some(cron_str) = cron {
-        cron_eval::next_occurrence(&cron_str, Utc::now())?;
         job.cron_expr = cron_str;
-    } else if let Some(at_str) = at {
-        let at_time = parse_at_time(&at_str).await?;
+    } else if let Some(at_time) = parsed_at {
         job.at_time = Some(at_time);
-    } else if let Some(every_str) = every {
-        job.every_secs = Some(parse_duration(&every_str)?);
+    } else if let Some(every_secs) = parsed_every {
+        job.every_secs = Some(every_secs);
     }
 
     store.add_job(job.clone())?;
@@ -924,6 +972,9 @@ async fn cmd_edit(
     trust_tools: Option<String>,
     runner: Option<String>,
     description: Option<String>,
+    delete_after_run: Option<bool>,
+    allow_overlap: Option<bool>,
+    allow_url_trigger: Option<bool>,
 ) -> boo::error::Result<()> {
     let store = JobStore::new()?;
     let mut job = resolve_job(&store, target)?;
@@ -950,22 +1001,28 @@ async fn cmd_edit(
         job.name = new_name.clone();
         changes.push(format!("name → {new_name}"));
     }
+    // Editing the schedule resets last_run: an at-job must be able to fire
+    // again (it only fires while last_run is unset), while cron/every jobs
+    // restart from now so the change doesn't trigger a surprise catch-up run.
     if let Some(v) = cron {
         cron_eval::next_occurrence(&v, Utc::now())?;
         job.cron_expr = v.clone();
         job.at_time = None;
         job.every_secs = None;
+        job.last_run = Some(Utc::now());
         changes.push(format!("cron → {v}"));
     } else if let Some(v) = at {
         let at_time = parse_at_time(&v).await?;
         job.at_time = Some(at_time);
         job.cron_expr = String::new();
         job.every_secs = None;
+        job.last_run = None;
         changes.push(format!("at → {at_time}"));
     } else if let Some(v) = every {
         job.every_secs = Some(parse_duration(&v)?);
         job.cron_expr = String::new();
         job.at_time = None;
+        job.last_run = Some(Utc::now());
         changes.push(format!("every → {v}"));
     }
     if let Some(v) = prompt {
@@ -977,6 +1034,12 @@ async fn cmd_edit(
         changes.push(format!("command → {v}"));
     }
     if let Some(v) = dir {
+        if !v.exists() {
+            return Err(boo::error::BooError::Other(format!(
+                "Working directory does not exist: {}",
+                v.display()
+            )));
+        }
         job.working_dir = v.clone();
         changes.push(format!("dir → {}", v.display()));
     }
@@ -1033,6 +1096,18 @@ async fn cmd_edit(
         job.description = Some(v.clone());
         changes.push(format!("description → {v}"));
     }
+    if let Some(v) = delete_after_run {
+        job.delete_after_run = v;
+        changes.push(format!("delete_after_run → {v}"));
+    }
+    if let Some(v) = allow_overlap {
+        job.allow_overlap = v;
+        changes.push(format!("allow_overlap → {v}"));
+    }
+    if let Some(v) = allow_url_trigger {
+        job.allow_url_trigger = v;
+        changes.push(format!("allow_url_trigger → {v}"));
+    }
 
     if changes.is_empty() {
         println!("No changes specified.");
@@ -1074,7 +1149,13 @@ fn cmd_list(format: &str) -> boo::error::Result<()> {
                 "disabled".into()
             } else {
                 cron_eval::next_fire_time(job, now)
-                    .map(|t| t.format("%m-%d %H:%M UTC").to_string())
+                    .map(|t| {
+                        if t < now {
+                            "overdue".to_string()
+                        } else {
+                            t.format("%m-%d %H:%M UTC").to_string()
+                        }
+                    })
                     .unwrap_or_else(|| "done".into())
             };
             let last_run = job
@@ -1495,20 +1576,12 @@ fn cmd_clean(keep_logs: bool, dry_run: bool) -> boo::error::Result<()> {
     let jobs = store.load_jobs()?;
     let now = Utc::now();
 
+    // One-shot (at) jobs count as cleanable if they already ran, or if their
+    // time has passed — disabled ones included (they were previously skipped
+    // and lingered forever).
     let done_jobs: Vec<&Job> = jobs
         .iter()
-        .filter(|j| {
-            j.enabled && {
-                // A one-shot is "done" if next_fire is None (already ran) OR
-                // if it's an at_time job whose time has passed (never ran but expired)
-                let next = cron_eval::next_fire_time(j, now);
-                match next {
-                    None => true,
-                    Some(t) if j.at_time.is_some() && t < now => true,
-                    _ => false,
-                }
-            }
-        })
+        .filter(|j| j.at_time.is_some_and(|at| j.last_run.is_some() || at < now))
         .collect();
 
     if done_jobs.is_empty() {
@@ -1518,7 +1591,18 @@ fn cmd_clean(keep_logs: bool, dry_run: bool) -> boo::error::Result<()> {
 
     let label = if dry_run { "Would remove" } else { "Removing" };
     for job in &done_jobs {
-        println!("{}: {} ({})", label, job.name, &job.id.to_string()[..8]);
+        let note = if job.last_run.is_none() && job.enabled {
+            " (expired but never ran — the daemon would still catch it up)"
+        } else {
+            ""
+        };
+        println!(
+            "{}: {} ({}){}",
+            label,
+            job.name,
+            &job.id.to_string()[..8],
+            note
+        );
     }
 
     if dry_run {
@@ -1927,15 +2011,22 @@ fn resolve_job(store: &JobStore, target: &str) -> boo::error::Result<Job> {
 /// Parse a duration string like "30s", "20m", "6h", "1d" into seconds.
 pub fn parse_duration(s: &str) -> boo::error::Result<u64> {
     let s = s.trim();
-    let (num, suffix) = s.split_at(s.len().saturating_sub(1));
+    // chars().last() keeps this safe for multi-byte input like "5µ",
+    // where a byte-based split_at would panic on a char boundary
+    let Some(suffix) = s.chars().last() else {
+        return Err(boo::error::BooError::Other(
+            "Invalid duration: empty. Use e.g. 30m, 6h, 1d".into(),
+        ));
+    };
+    let num = &s[..s.len() - suffix.len_utf8()];
     let n: u64 = num
         .parse()
         .map_err(|_| boo::error::BooError::Other(format!("Invalid duration: {s}")))?;
     match suffix {
-        "s" => Ok(n),
-        "m" => Ok(n * 60),
-        "h" => Ok(n * 3600),
-        "d" => Ok(n * 86400),
+        's' => Ok(n),
+        'm' => Ok(n * 60),
+        'h' => Ok(n * 3600),
+        'd' => Ok(n * 86400),
         _ => Err(boo::error::BooError::Other(format!(
             "Invalid duration suffix: {s}. Use s/m/h/d"
         ))),

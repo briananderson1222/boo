@@ -49,18 +49,29 @@ pub fn next_fire_time(job: &Job, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     next_occurrence(&job.cron_expr, now).ok()
 }
 
-/// Count missed occurrences between from and to. Capped at 1000.
+/// Count occurrences missed in (from, to], excluding the occurrence being
+/// fired right now — an on-time run reports 0 missed. Capped at 1000.
 pub fn missed_count(cron_expr: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> u32 {
     let mut count = 0u32;
     let mut current = from;
     while let Ok(next) = next_occurrence(cron_expr, current) {
-        if next > to || count >= 1000 {
+        if next > to || count > 1000 {
             break;
         }
         count += 1;
         current = next;
     }
-    count
+    count.saturating_sub(1)
+}
+
+/// Missed-interval count for `every` jobs, excluding the interval being
+/// fired right now — an on-time run reports 0 missed.
+pub fn missed_count_every(every_secs: u64, from: DateTime<Utc>, to: DateTime<Utc>) -> u32 {
+    if every_secs == 0 || to <= from {
+        return 0;
+    }
+    let elapsed = (to - from).num_seconds().max(0) as u64;
+    (elapsed / every_secs).saturating_sub(1).min(1000) as u32
 }
 
 /// Return the next N cron occurrences from `from` for preview.
@@ -164,6 +175,47 @@ mod tests {
         job.last_run = Some(now - Duration::minutes(30));
         let expected = job.last_run.unwrap() + Duration::seconds(3600);
         assert_eq!(next_fire_time(&job, now), Some(expected));
+    }
+
+    #[test]
+    fn test_missed_count_on_time_is_zero() {
+        // Fired exactly one minute after the previous run of a * * * * *
+        // job: nothing was missed.
+        let from = Utc::now();
+        let to = from + Duration::seconds(60);
+        assert_eq!(missed_count("* * * * *", from, to), 0);
+    }
+
+    #[test]
+    fn test_missed_count_late_run() {
+        // 10 minutes late on a every-minute cron: 9 occurrences were missed
+        // before the one firing now.
+        let from = "2026-01-01T00:00:30Z".parse().unwrap();
+        let to = "2026-01-01T00:10:30Z".parse().unwrap();
+        assert_eq!(missed_count("* * * * *", from, to), 9);
+    }
+
+    #[test]
+    fn test_missed_count_every_on_time_is_zero() {
+        let from = Utc::now();
+        assert_eq!(
+            missed_count_every(300, from, from + Duration::seconds(300)),
+            0
+        );
+        assert_eq!(
+            missed_count_every(300, from, from + Duration::seconds(599)),
+            0
+        );
+    }
+
+    #[test]
+    fn test_missed_count_every_late() {
+        let from = Utc::now();
+        // 3 intervals elapsed; one is the current fire, two were missed
+        assert_eq!(
+            missed_count_every(300, from, from + Duration::seconds(900)),
+            2
+        );
     }
 
     proptest! {

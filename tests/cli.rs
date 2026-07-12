@@ -408,6 +408,124 @@ fn test_list_format_json() {
 }
 
 #[test]
+fn test_add_multibyte_duration_rejected_gracefully() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args(["add", "--name", "mb", "--every", "5µ", "--prompt", "x"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid duration"));
+}
+
+#[test]
+fn test_edit_rejects_conflicting_schedules() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args(["add", "--name", "conf", "--every", "1h", "--prompt", "x"])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .args([
+            "edit",
+            "conf",
+            "--cron",
+            "0 9 * * *",
+            "--at",
+            "2099-01-01T00:00:00Z",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_edit_rejects_missing_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args(["add", "--name", "edir", "--every", "1h", "--prompt", "x"])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .args(["edit", "edir", "--dir", "/nonexistent/path/xyz"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("does not exist"));
+}
+
+#[test]
+fn test_edit_toggles_delete_after_run_and_overlap() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args(["add", "--name", "toggles", "--every", "1h", "--prompt", "x"])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .args([
+            "edit",
+            "toggles",
+            "--delete-after-run",
+            "true",
+            "--allow-overlap",
+            "true",
+            "--allow-url-trigger",
+            "true",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("delete_after_run → true"))
+        .stdout(predicate::str::contains("allow_overlap → true"))
+        .stdout(predicate::str::contains("allow_url_trigger → true"));
+}
+
+#[test]
+fn test_failed_add_leaves_no_workspace_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    // Invalid cron fails after the workspace default is chosen — no
+    // directory must be left behind
+    boo_isolated(dir.path())
+        .args([
+            "add",
+            "--name",
+            "orphan",
+            "--cron",
+            "not-a-cron",
+            "--prompt",
+            "x",
+        ])
+        .assert()
+        .failure();
+    assert!(
+        !dir.path().join(".boo/workspace/orphan").exists(),
+        "failed add must not leave an orphan workspace dir"
+    );
+}
+
+#[test]
+fn test_clean_includes_disabled_oneshots() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args([
+            "add",
+            "--name",
+            "dis-oneshot",
+            "--at",
+            "2020-01-01T00:00:00Z",
+            "--prompt",
+            "x",
+        ])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .args(["disable", "dis-oneshot"])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .arg("clean")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dis-oneshot"));
+}
+
+#[test]
 fn test_run_new_window_flag_accepted() {
     // Verify --new-window is a valid flag without actually opening a terminal
     boo()

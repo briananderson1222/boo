@@ -281,8 +281,10 @@ impl<C: Clock + 'static> Scheduler<C> {
             cron_eval::next_occurrence(&job.cron_expr, from_time)?
         };
 
-        let missed = if job.at_time.is_some() || job.every_secs.is_some() {
+        let missed = if job.at_time.is_some() {
             0
+        } else if let Some(every_secs) = job.every_secs {
+            cron_eval::missed_count_every(every_secs, from_time, now)
         } else {
             cron_eval::missed_count(&job.cron_expr, from_time, now)
         };
