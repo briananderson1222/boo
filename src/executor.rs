@@ -267,12 +267,23 @@ pub async fn execute_job(
             .map_err(BooError::Io)?;
     }
 
-    // The ACP runner speaks a JSON-RPC protocol rather than a one-shot CLI, so
-    // it has its own execution path.
+    // Dispatch to the execution backend for this runner: ACP speaks a JSON-RPC
+    // protocol; every other runner is a one-shot CLI.
     if job.runner.as_deref() == Some("acp") {
         return crate::acp::run_acp(job, config, log_path, on_spawn).await;
     }
+    execute_cli_job(job, config, log_path, on_spawn).await
+}
 
+/// Execute a one-shot CLI runner: spawn it, feed the prompt to stdin, capture
+/// stdout/stderr, enforce the timeout, and record the run. Assumes the working
+/// and log directories already exist (ensured by [`execute_job`]).
+async fn execute_cli_job(
+    job: &Job,
+    config: &Config,
+    log_path: &Path,
+    on_spawn: Option<&(dyn Fn(u32) + Send + Sync)>,
+) -> Result<ExecutionResult> {
     let runner = get_runner(job);
     let start = Instant::now();
     let timeout_secs = job.timeout_secs.unwrap_or(config.default_timeout_secs);

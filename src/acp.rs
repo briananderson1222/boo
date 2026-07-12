@@ -9,6 +9,13 @@
 //! `agent_message_chunk` text as the response, auto-answer tool-permission
 //! requests per the job's trust settings, and finish when `session/prompt`
 //! returns a `stopReason`.
+//!
+//! The official `agent-client-protocol` crate covers the full protocol, but it
+//! pulls in the `futures`/`async-process`/`schemars` stack and isn't
+//! tokio-native — heavy for boo's one narrow use case (a single prompt turn).
+//! This hand-rolled client needs only `serde_json` + `tokio` (both already
+//! dependencies). If boo ever needs full ACP capabilities (fs methods,
+//! terminals, richer tool handling), switching to that SDK is the right move.
 
 use crate::config::Config;
 use crate::error::{BooError, Result};
