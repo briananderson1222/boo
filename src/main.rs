@@ -25,76 +25,136 @@ struct Cli {
     command: Commands,
 }
 
+/// Arguments for `boo add`. Grouped into a struct (rather than 20 positional
+/// function args) so two adjacent same-typed fields can't be silently swapped.
+#[derive(clap::Args)]
+struct AddArgs {
+    #[arg(long)]
+    name: String,
+    /// Cron expression (e.g. "0 9 * * 1-5")
+    #[arg(long, group = "schedule")]
+    cron: Option<String>,
+    /// One-shot time (ISO 8601 or natural language like "tomorrow 9am")
+    #[arg(long, group = "schedule")]
+    at: Option<String>,
+    /// Interval (e.g. "30m", "6h", "1d")
+    #[arg(long, group = "schedule")]
+    every: Option<String>,
+    #[arg(long)]
+    prompt: Option<String>,
+    /// Raw shell command (shortcut for --runner shell)
+    #[arg(long, conflicts_with = "prompt")]
+    command: Option<String>,
+    #[arg(long)]
+    dir: Option<PathBuf>,
+    #[arg(long)]
+    agent: Option<String>,
+    #[arg(long)]
+    model: Option<String>,
+    #[arg(long)]
+    timeout: Option<u64>,
+    /// IANA timezone for cron/at evaluation (e.g. "America/New_York").
+    /// Defaults to UTC.
+    #[arg(long)]
+    timezone: Option<String>,
+    /// Auto-delete job after successful execution
+    #[arg(long)]
+    delete_after_run: bool,
+    /// File to open when notification is clicked (relative to working dir)
+    #[arg(long)]
+    open_artifact: Option<String>,
+    /// Max retry attempts on failure
+    #[arg(long, default_value = "0")]
+    retry: u32,
+    /// Seconds between retries
+    #[arg(long, default_value = "60")]
+    retry_delay: u64,
+    /// Send a start notification when this job begins
+    #[arg(long)]
+    notify_start: bool,
+    /// Pass --trust-all-tools to kiro-cli
+    #[arg(long)]
+    trust_all_tools: bool,
+    /// Trust only these tools (comma-separated). Example: --trust-tools=write,shell
+    #[arg(long)]
+    trust_tools: Option<String>,
+    /// Runner type: kiro (default), shell, or future CLI names
+    #[arg(long)]
+    runner: Option<String>,
+    /// Human-readable description of what this job does
+    #[arg(long)]
+    description: Option<String>,
+    /// Allow this job to fire again while a previous run is still going
+    #[arg(long)]
+    allow_overlap: bool,
+    /// Allow boo:// links to run/resume this job (any web page can fire
+    /// such links — only enable for jobs you'd trust a link click to run)
+    #[arg(long)]
+    allow_url_trigger: bool,
+}
+
+/// Arguments for `boo edit`. Every field is optional; only supplied fields
+/// change. Grouped for the same reason as AddArgs.
+#[derive(clap::Args)]
+struct EditArgs {
+    target: String,
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long, group = "schedule")]
+    cron: Option<String>,
+    #[arg(long, group = "schedule")]
+    at: Option<String>,
+    #[arg(long, group = "schedule")]
+    every: Option<String>,
+    #[arg(long)]
+    prompt: Option<String>,
+    #[arg(long)]
+    command: Option<String>,
+    #[arg(long)]
+    dir: Option<PathBuf>,
+    #[arg(long)]
+    agent: Option<String>,
+    #[arg(long)]
+    model: Option<String>,
+    #[arg(long)]
+    timeout: Option<u64>,
+    #[arg(long)]
+    timezone: Option<String>,
+    #[arg(long)]
+    open_artifact: Option<String>,
+    #[arg(long)]
+    retry: Option<u32>,
+    #[arg(long)]
+    retry_delay: Option<u64>,
+    #[arg(long)]
+    notify_start: Option<bool>,
+    #[arg(long)]
+    trust_all_tools: Option<bool>,
+    /// Trust only these tools (comma-separated, or empty string to clear)
+    #[arg(long)]
+    trust_tools: Option<String>,
+    #[arg(long)]
+    runner: Option<String>,
+    #[arg(long)]
+    description: Option<String>,
+    /// Auto-delete job after successful execution (true/false)
+    #[arg(long)]
+    delete_after_run: Option<bool>,
+    /// Allow overlapping runs (true/false)
+    #[arg(long)]
+    allow_overlap: Option<bool>,
+    /// Allow boo:// links to run/resume this job (true/false)
+    #[arg(long)]
+    allow_url_trigger: Option<bool>,
+}
+
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 enum Commands {
     /// Start the scheduler daemon
     Daemon,
     /// Add a new scheduled job
-    Add {
-        #[arg(long)]
-        name: String,
-        /// Cron expression (e.g. "0 9 * * 1-5")
-        #[arg(long, group = "schedule")]
-        cron: Option<String>,
-        /// One-shot time (ISO 8601 or natural language like "tomorrow 9am")
-        #[arg(long, group = "schedule")]
-        at: Option<String>,
-        /// Interval (e.g. "30m", "6h", "1d")
-        #[arg(long, group = "schedule")]
-        every: Option<String>,
-        #[arg(long)]
-        prompt: Option<String>,
-        /// Raw shell command (shortcut for --runner shell)
-        #[arg(long, conflicts_with = "prompt")]
-        command: Option<String>,
-        #[arg(long)]
-        dir: Option<PathBuf>,
-        #[arg(long)]
-        agent: Option<String>,
-        #[arg(long)]
-        model: Option<String>,
-        #[arg(long)]
-        timeout: Option<u64>,
-        /// IANA timezone for cron/at evaluation (e.g. "America/New_York").
-        /// Defaults to UTC.
-        #[arg(long)]
-        timezone: Option<String>,
-        /// Auto-delete job after successful execution
-        #[arg(long)]
-        delete_after_run: bool,
-        /// File to open when notification is clicked (relative to working dir)
-        #[arg(long)]
-        open_artifact: Option<String>,
-        /// Max retry attempts on failure
-        #[arg(long, default_value = "0")]
-        retry: u32,
-        /// Seconds between retries
-        #[arg(long, default_value = "60")]
-        retry_delay: u64,
-        /// Send a start notification when this job begins
-        #[arg(long)]
-        notify_start: bool,
-        /// Pass --trust-all-tools to kiro-cli
-        #[arg(long)]
-        trust_all_tools: bool,
-        /// Trust only these tools (comma-separated). Example: --trust-tools=write,shell
-        #[arg(long)]
-        trust_tools: Option<String>,
-        /// Runner type: kiro (default), shell, or future CLI names
-        #[arg(long)]
-        runner: Option<String>,
-        /// Human-readable description of what this job does
-        #[arg(long)]
-        description: Option<String>,
-        /// Allow this job to fire again while a previous run is still going
-        #[arg(long)]
-        allow_overlap: bool,
-        /// Allow boo:// links to run/resume this job (any web page can fire
-        /// such links — only enable for jobs you'd trust a link click to run)
-        #[arg(long)]
-        allow_url_trigger: bool,
-    },
+    Add(AddArgs),
     /// Remove a job by ID or name
     Remove {
         target: String,
@@ -176,57 +236,7 @@ enum Commands {
         format: String,
     },
     /// Edit an existing job's settings
-    Edit {
-        target: String,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long, group = "schedule")]
-        cron: Option<String>,
-        #[arg(long, group = "schedule")]
-        at: Option<String>,
-        #[arg(long, group = "schedule")]
-        every: Option<String>,
-        #[arg(long)]
-        prompt: Option<String>,
-        #[arg(long)]
-        command: Option<String>,
-        #[arg(long)]
-        dir: Option<PathBuf>,
-        #[arg(long)]
-        agent: Option<String>,
-        #[arg(long)]
-        model: Option<String>,
-        #[arg(long)]
-        timeout: Option<u64>,
-        #[arg(long)]
-        timezone: Option<String>,
-        #[arg(long)]
-        open_artifact: Option<String>,
-        #[arg(long)]
-        retry: Option<u32>,
-        #[arg(long)]
-        retry_delay: Option<u64>,
-        #[arg(long)]
-        notify_start: Option<bool>,
-        #[arg(long)]
-        trust_all_tools: Option<bool>,
-        /// Trust only these tools (comma-separated, or empty string to clear)
-        #[arg(long)]
-        trust_tools: Option<String>,
-        #[arg(long)]
-        runner: Option<String>,
-        #[arg(long)]
-        description: Option<String>,
-        /// Auto-delete job after successful execution (true/false)
-        #[arg(long)]
-        delete_after_run: Option<bool>,
-        /// Allow overlapping runs (true/false)
-        #[arg(long)]
-        allow_overlap: Option<bool>,
-        /// Allow boo:// links to run/resume this job (true/false)
-        #[arg(long)]
-        allow_url_trigger: Option<bool>,
-    },
+    Edit(EditArgs),
     /// Show only currently running jobs
     Running {
         /// Output format: table (default), json
@@ -440,113 +450,13 @@ fn urldecode(s: &str) -> String {
 async fn run(cli: Cli) -> boo::error::Result<()> {
     match cli.command {
         Commands::Daemon => unreachable!("handled before tokio runtime"),
-        Commands::Add {
-            name,
-            cron,
-            at,
-            every,
-            prompt,
-            command,
-            dir,
-            agent,
-            model,
-            timeout,
-            timezone,
-            delete_after_run,
-            open_artifact,
-            retry,
-            retry_delay,
-            notify_start,
-            trust_all_tools,
-            trust_tools,
-            runner,
-            description,
-            allow_overlap,
-            allow_url_trigger,
-        } => {
-            cmd_add(
-                name,
-                cron,
-                at,
-                every,
-                prompt,
-                command,
-                dir,
-                agent,
-                model,
-                timeout,
-                timezone,
-                delete_after_run,
-                open_artifact,
-                retry,
-                retry_delay,
-                notify_start,
-                trust_all_tools,
-                trust_tools,
-                runner,
-                description,
-                allow_overlap,
-                allow_url_trigger,
-            )
-            .await
-        }
+        Commands::Add(args) => cmd_add(args).await,
         Commands::Remove {
             target,
             delete_logs,
             keep_logs,
         } => cmd_remove(&target, delete_logs, keep_logs),
-        Commands::Edit {
-            target,
-            name,
-            cron,
-            at,
-            every,
-            prompt,
-            command,
-            dir,
-            agent,
-            model,
-            timeout,
-            timezone,
-            open_artifact,
-            retry,
-            retry_delay,
-            notify_start,
-            trust_all_tools,
-            trust_tools,
-            runner,
-            description,
-            delete_after_run,
-            allow_overlap,
-            allow_url_trigger,
-        } => {
-            cmd_edit(
-                &target,
-                name,
-                cron,
-                at,
-                every,
-                prompt,
-                command,
-                dir,
-                agent,
-                model,
-                timeout,
-                timezone,
-                open_artifact,
-                retry,
-                retry_delay,
-                notify_start,
-                trust_all_tools,
-                trust_tools,
-                runner,
-                description,
-                delete_after_run,
-                allow_overlap,
-                allow_url_trigger,
-            )
-            .await
-        }
+        Commands::Edit(args) => cmd_edit(args).await,
         Commands::List { format } => cmd_list(&format),
         Commands::Enable { target } => cmd_set_enabled(&target, true),
         Commands::Disable { target } => cmd_set_enabled(&target, false),
@@ -814,31 +724,31 @@ async fn cmd_run(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn cmd_add(
-    name: String,
-    cron: Option<String>,
-    at: Option<String>,
-    every: Option<String>,
-    prompt: Option<String>,
-    command: Option<String>,
-    dir: Option<PathBuf>,
-    agent: Option<String>,
-    model: Option<String>,
-    timeout: Option<u64>,
-    timezone: Option<String>,
-    delete_after_run: bool,
-    open_artifact: Option<String>,
-    retry: u32,
-    retry_delay: u64,
-    notify_start: bool,
-    trust_all_tools: bool,
-    trust_tools: Option<String>,
-    runner: Option<String>,
-    description: Option<String>,
-    allow_overlap: bool,
-    allow_url_trigger: bool,
-) -> boo::error::Result<()> {
+async fn cmd_add(args: AddArgs) -> boo::error::Result<()> {
+    let AddArgs {
+        name,
+        cron,
+        at,
+        every,
+        prompt,
+        command,
+        dir,
+        agent,
+        model,
+        timeout,
+        timezone,
+        delete_after_run,
+        open_artifact,
+        retry,
+        retry_delay,
+        notify_start,
+        trust_all_tools,
+        trust_tools,
+        runner,
+        description,
+        allow_overlap,
+        allow_url_trigger,
+    } = args;
     if prompt.is_none() && command.is_none() {
         return Err(boo::error::BooError::Other(
             "Must specify --prompt or --command".into(),
@@ -975,34 +885,34 @@ fn cmd_remove(target: &str, delete_logs: bool, keep_logs: bool) -> boo::error::R
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn cmd_edit(
-    target: &str,
-    name: Option<String>,
-    cron: Option<String>,
-    at: Option<String>,
-    every: Option<String>,
-    prompt: Option<String>,
-    command: Option<String>,
-    dir: Option<PathBuf>,
-    agent: Option<String>,
-    model: Option<String>,
-    timeout: Option<u64>,
-    timezone: Option<String>,
-    open_artifact: Option<String>,
-    retry: Option<u32>,
-    retry_delay: Option<u64>,
-    notify_start: Option<bool>,
-    trust_all_tools: Option<bool>,
-    trust_tools: Option<String>,
-    runner: Option<String>,
-    description: Option<String>,
-    delete_after_run: Option<bool>,
-    allow_overlap: Option<bool>,
-    allow_url_trigger: Option<bool>,
-) -> boo::error::Result<()> {
+async fn cmd_edit(args: EditArgs) -> boo::error::Result<()> {
+    let EditArgs {
+        target,
+        name,
+        cron,
+        at,
+        every,
+        prompt,
+        command,
+        dir,
+        agent,
+        model,
+        timeout,
+        timezone,
+        open_artifact,
+        retry,
+        retry_delay,
+        notify_start,
+        trust_all_tools,
+        trust_tools,
+        runner,
+        description,
+        delete_after_run,
+        allow_overlap,
+        allow_url_trigger,
+    } = args;
     let store = JobStore::new()?;
-    let mut job = resolve_job(&store, target)?;
+    let mut job = resolve_job(&store, &target)?;
     let mut changes = Vec::new();
 
     if let Some(ref new_name) = name {
