@@ -594,22 +594,19 @@ async fn cmd_run(
         job.trust_tools = Some(tools.clone());
     }
 
-    // Interactive/resume sessions are still kiro-cli specific. Rather than
-    // silently launching kiro-cli for a claude/codex job, refuse clearly.
-    if interactive {
+    // The new-terminal-window launcher builds a kiro-cli command, so it's the
+    // one interactive path that's still kiro-only. Foreground interactive works
+    // for every runner (see interactive_command).
+    if interactive && new_window {
         if let Some(r) = job.runner.as_deref() {
             if r != "kiro" {
                 return Err(boo::error::BooError::Other(format!(
-                    "Interactive sessions are only supported for the kiro runner today \
-                     (job '{}' uses runner '{r}'). Run it non-interactively with \
-                     `boo run {}`.",
+                    "--new-window is only supported for the kiro runner today (job '{}' \
+                     uses runner '{r}'). Use `boo run {} --interactive` (foreground) instead.",
                     job.name, job.name
                 )));
             }
         }
-    }
-
-    if interactive && new_window {
         // Open in a new terminal window and return the job ID for tracking
         notifier::open_terminal_run(
             &job.name,
@@ -623,6 +620,7 @@ async fn cmd_run(
 
     if interactive {
         return launch_interactive_session(
+            job.runner.as_deref(),
             &job.working_dir,
             job.agent.as_deref(),
             Some(&job.prompt),
@@ -807,7 +805,7 @@ async fn cmd_add(args: AddArgs) -> boo::error::Result<()> {
 
     // Validate the schedule before creating anything on disk
     let parsed_at = match &at {
-        Some(at_str) => Some(parse_at_time(at_str).await?),
+        Some(at_str) => Some(parse_at_time(at_str, runner.as_deref()).await?),
         None => None,
     };
     let parsed_every = match &every {
@@ -966,7 +964,10 @@ async fn cmd_edit(args: EditArgs) -> boo::error::Result<()> {
         job.last_run = Some(Utc::now());
         changes.push(format!("cron → {v}"));
     } else if let Some(v) = at {
-        let at_time = parse_at_time(&v).await?;
+        // Use the effective runner (new one if being set, else the job's) so
+        // NL parsing uses a CLI the user actually has.
+        let effective_runner = runner.as_deref().or(job.runner.as_deref());
+        let at_time = parse_at_time(&v, effective_runner).await?;
         job.at_time = Some(at_time);
         job.cron_expr = String::new();
         job.every_secs = None;
@@ -1380,35 +1381,87 @@ fn cmd_logs(target: &str, count: usize, output: bool, format: &str) -> boo::erro
     Ok(())
 }
 
-fn launch_interactive_session(
+/// Build an interactive session command for a runner.
+///
+/// `resume`: `None` = fresh session, `Some(false)` = resume the most recent
+/// session, `Some(true)` = show a session picker. `agent` applies to kiro only.
+fn interactive_command(
+    runner: Option<&str>,
+    config: &Config,
     dir: &std::path::Path,
     agent: Option<&str>,
     prompt: Option<&str>,
-    resume: Option<bool>, // None = fresh, Some(false) = --resume latest, Some(true) = --resume-picker
+    resume: Option<bool>,
+) -> std::process::Command {
+    let mut cmd = match runner {
+        Some("claude") => {
+            let mut c = std::process::Command::new(&config.claude_cli_path);
+            // Claude Code's interactive resume is --continue (most recent in
+            // this dir); it has no separate picker, so both resume modes map
+            // to --continue.
+            if resume.is_some() {
+                c.arg("--continue");
+            }
+            if let Some(p) = prompt {
+                c.arg(p);
+            }
+            c
+        }
+        Some("codex") => {
+            let mut c = std::process::Command::new(&config.codex_cli_path);
+            match resume {
+                Some(false) => {
+                    c.args(["resume", "--last"]);
+                }
+                Some(true) => {
+                    c.arg("resume");
+                }
+                None => {}
+            }
+            if let Some(p) = prompt {
+                c.arg(p);
+            }
+            c
+        }
+        // kiro (default)
+        _ => {
+            let mut c = std::process::Command::new(&config.kiro_cli_path);
+            c.arg("chat");
+            match resume {
+                Some(true) => {
+                    c.arg("--resume-picker");
+                }
+                Some(false) => {
+                    c.arg("--resume");
+                }
+                None => {}
+            }
+            if let Some(a) = agent {
+                c.args(["--agent", a]);
+            }
+            if let Some(p) = prompt {
+                c.args(["--", p]);
+            }
+            c
+        }
+    };
+    cmd.current_dir(dir);
+    cmd
+}
+
+fn launch_interactive_session(
+    runner: Option<&str>,
+    dir: &std::path::Path,
+    agent: Option<&str>,
+    prompt: Option<&str>,
+    resume: Option<bool>,
 ) -> boo::error::Result<()> {
     let config = Config::load();
-    let mut cmd = std::process::Command::new(&config.kiro_cli_path);
-    cmd.arg("chat");
-    match resume {
-        Some(true) => {
-            cmd.arg("--resume-picker");
-        }
-        Some(false) => {
-            cmd.arg("--resume");
-        }
-        None => {}
-    }
-    if let Some(a) = agent {
-        cmd.args(["--agent", a]);
-    }
-    if let Some(p) = prompt {
-        cmd.args(["--", p]);
-    }
-    cmd.current_dir(dir);
+    let mut cmd = interactive_command(runner, &config, dir, agent, prompt, resume);
     let status = cmd.status().map_err(boo::error::BooError::Io)?;
     if !status.success() {
         return Err(boo::error::BooError::Other(
-            "kiro-cli session exited with error".into(),
+            "interactive session exited with error".into(),
         ));
     }
     Ok(())
@@ -1419,14 +1472,24 @@ fn cmd_resume(
     prompt: Option<&str>,
     previous: bool,
 ) -> boo::error::Result<()> {
-    let (dir, agent) = if let Some(t) = target {
+    let (dir, agent, runner) = if let Some(t) = target {
         let store = JobStore::new()?;
         let job = resolve_job(&store, t)?;
-        (job.working_dir.clone(), job.agent.clone())
+        (
+            job.working_dir.clone(),
+            job.agent.clone(),
+            job.runner.clone(),
+        )
     } else {
-        (boo::config::boo_dir().join("workspace"), None)
+        (boo::config::boo_dir().join("workspace"), None, None)
     };
-    launch_interactive_session(&dir, agent.as_deref(), prompt, Some(previous))
+    launch_interactive_session(
+        runner.as_deref(),
+        &dir,
+        agent.as_deref(),
+        prompt,
+        Some(previous),
+    )
 }
 
 fn cmd_running(format: &str) -> boo::error::Result<()> {
@@ -1968,7 +2031,7 @@ pub fn parse_duration(s: &str) -> boo::error::Result<u64> {
 }
 
 /// Parse an --at time string. Tries ISO 8601 first, then uses kiro-cli for natural language.
-async fn parse_at_time(input: &str) -> boo::error::Result<DateTime<Utc>> {
+async fn parse_at_time(input: &str, runner: Option<&str>) -> boo::error::Result<DateTime<Utc>> {
     // Try ISO 8601 first
     if let Ok(dt) = input.parse::<DateTime<Utc>>() {
         return Ok(dt);
@@ -1984,7 +2047,8 @@ async fn parse_at_time(input: &str) -> boo::error::Result<DateTime<Utc>> {
         return Ok(dt.and_utc());
     }
 
-    // Natural language: use kiro-cli to parse
+    // Natural language: ask the job's runner CLI to parse it, so a user who
+    // only has claude/codex installed isn't forced to have kiro-cli too.
     let config = Config::load();
     let now = Utc::now();
     let prompt = format!(
@@ -1992,17 +2056,41 @@ async fn parse_at_time(input: &str) -> boo::error::Result<DateTime<Utc>> {
         now.to_rfc3339(), input
     );
 
-    eprintln!("Parsing '{}' via AI...", input);
+    eprintln!("Parsing '{}' via {}...", input, runner.unwrap_or("kiro"));
 
-    let output = tokio::process::Command::new(&config.kiro_cli_path)
-        .args([
-            "chat",
-            "--no-interactive",
-            "--trust-tools=",
-            "--wrap",
-            "never",
-            &prompt,
-        ])
+    let (program, args): (&str, Vec<String>) = match runner {
+        Some("claude") => (
+            &config.claude_cli_path,
+            vec![
+                "-p".into(),
+                "--output-format".into(),
+                "text".into(),
+                prompt.clone(),
+            ],
+        ),
+        Some("codex") => (
+            &config.codex_cli_path,
+            vec![
+                "exec".into(),
+                "--skip-git-repo-check".into(),
+                prompt.clone(),
+            ],
+        ),
+        _ => (
+            &config.kiro_cli_path,
+            vec![
+                "chat".into(),
+                "--no-interactive".into(),
+                "--trust-tools=".into(),
+                "--wrap".into(),
+                "never".into(),
+                prompt.clone(),
+            ],
+        ),
+    };
+
+    let output = tokio::process::Command::new(program)
+        .args(&args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output()
@@ -2063,4 +2151,120 @@ fn is_daemon_running(pid_path: &std::path::Path) -> bool {
         let _ = file.unlock();
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn parts(cmd: &std::process::Command) -> (String, Vec<String>) {
+        (
+            cmd.get_program().to_string_lossy().into_owned(),
+            cmd.get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn interactive_kiro_fresh_and_resume() {
+        let cfg = Config::default();
+        let dir = Path::new("/tmp/x");
+        let (p, a) = parts(&interactive_command(
+            None,
+            &cfg,
+            dir,
+            Some("sales"),
+            Some("hi"),
+            None,
+        ));
+        assert!(p.contains("kiro-cli"));
+        assert_eq!(a.first().map(String::as_str), Some("chat"));
+        assert!(a.contains(&"--agent".to_string()) && a.contains(&"sales".to_string()));
+        assert!(a.contains(&"hi".to_string()));
+        assert!(!a.contains(&"--resume".to_string()));
+
+        let (_p, a) = parts(&interactive_command(
+            Some("kiro"),
+            &cfg,
+            dir,
+            None,
+            None,
+            Some(false),
+        ));
+        assert!(a.contains(&"--resume".to_string()));
+        let (_p, a) = parts(&interactive_command(
+            Some("kiro"),
+            &cfg,
+            dir,
+            None,
+            None,
+            Some(true),
+        ));
+        assert!(a.contains(&"--resume-picker".to_string()));
+    }
+
+    #[test]
+    fn interactive_claude_uses_continue_for_resume() {
+        let cfg = Config::default();
+        let dir = Path::new("/tmp/x");
+        let (p, a) = parts(&interactive_command(
+            Some("claude"),
+            &cfg,
+            dir,
+            None,
+            Some("go"),
+            Some(false),
+        ));
+        assert!(p.contains("claude"));
+        assert!(a.contains(&"--continue".to_string()));
+        assert!(a.contains(&"go".to_string()));
+        // Fresh session: no --continue
+        let (_p, a) = parts(&interactive_command(
+            Some("claude"),
+            &cfg,
+            dir,
+            None,
+            None,
+            None,
+        ));
+        assert!(!a.contains(&"--continue".to_string()));
+    }
+
+    #[test]
+    fn interactive_codex_resume_variants() {
+        let cfg = Config::default();
+        let dir = Path::new("/tmp/x");
+        let (p, a) = parts(&interactive_command(
+            Some("codex"),
+            &cfg,
+            dir,
+            None,
+            None,
+            Some(false),
+        ));
+        assert!(p.contains("codex"));
+        assert_eq!(&a[..2], &["resume".to_string(), "--last".to_string()]);
+        let (_p, a) = parts(&interactive_command(
+            Some("codex"),
+            &cfg,
+            dir,
+            None,
+            None,
+            Some(true),
+        ));
+        assert_eq!(a.first().map(String::as_str), Some("resume"));
+        assert!(!a.contains(&"--last".to_string()));
+        // Fresh with prompt: just the prompt, no resume
+        let (_p, a) = parts(&interactive_command(
+            Some("codex"),
+            &cfg,
+            dir,
+            None,
+            Some("hey"),
+            None,
+        ));
+        assert_eq!(a, vec!["hey".to_string()]);
+    }
 }

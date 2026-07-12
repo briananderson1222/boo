@@ -90,7 +90,7 @@ boo add --name backup --runner shell --every 1d \
   --command "rsync -a ~/docs /backup/"
 ```
 
-Binary paths are configurable (`kiro_cli_path` / `claude_cli_path` / `codex_cli_path`); they default to the CLI name on `PATH`. Interactive resume and natural-language `--at` currently work with the `kiro` runner only — requesting an interactive run for a `claude`/`codex` job errors clearly rather than silently using kiro-cli.
+Binary paths are configurable (`kiro_cli_path` / `claude_cli_path` / `codex_cli_path`); they default to the CLI name on `PATH`. Foreground interactive runs (`boo run --interactive`), session resume (`boo resume`), and natural-language `--at` parsing work for every runner — mapped to each CLI's own resume flags (kiro `--resume`, claude `--continue`, codex `resume --last`). Only `--new-window` and `boo://resume` deep links remain kiro-specific for now.
 
 ## Features you'll use
 

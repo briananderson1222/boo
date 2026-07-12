@@ -573,7 +573,9 @@ fn test_add_accepts_claude_and_codex_runners() {
 }
 
 #[test]
-fn test_interactive_rejected_for_non_kiro_runner() {
+fn test_new_window_rejected_for_non_kiro_runner() {
+    // Foreground interactive now works for every runner; only --new-window
+    // (whose terminal launcher builds a kiro command) is still kiro-only.
     let dir = tempfile::tempdir().unwrap();
     boo_isolated(dir.path())
         .args([
@@ -592,11 +594,11 @@ fn test_interactive_rejected_for_non_kiro_runner() {
         .assert()
         .success();
     boo_isolated(dir.path())
-        .args(["run", "cj", "--interactive"])
+        .args(["run", "cj", "--interactive", "--new-window"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "only supported for the kiro runner",
+            "--new-window is only supported for the kiro runner",
         ));
 }
 
