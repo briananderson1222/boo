@@ -87,6 +87,23 @@ impl Runner for ShellRunner {
     }
 }
 
+/// Known runner names. A `None`/unset runner defaults to kiro (or shell when a
+/// raw command is set).
+pub const VALID_RUNNERS: &[&str] = &["kiro", "shell"];
+
+/// Validate a `--runner` value, so a typo like "shel" is rejected at add/edit
+/// time instead of silently falling back to the kiro runner.
+pub fn validate_runner(runner: &str) -> Result<()> {
+    if VALID_RUNNERS.contains(&runner) {
+        Ok(())
+    } else {
+        Err(BooError::Other(format!(
+            "Unknown runner '{runner}'. Valid runners: {}",
+            VALID_RUNNERS.join(", ")
+        )))
+    }
+}
+
 /// Get the appropriate runner for a job.
 pub fn get_runner(job: &Job) -> Box<dyn Runner> {
     match job.runner.as_deref() {
@@ -97,7 +114,17 @@ pub fn get_runner(job: &Job) -> Box<dyn Runner> {
 }
 
 /// Execute a job, capturing output to log file.
-pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<ExecutionResult> {
+///
+/// `on_spawn` is invoked with the child's PID immediately after spawn so
+/// callers can record the real process to signal for `boo kill`/`boo wait`
+/// (recording the daemon's own PID here was a bug: the child lives in its
+/// own process group).
+pub async fn execute_job(
+    job: &Job,
+    config: &Config,
+    log_path: &Path,
+    on_spawn: Option<&(dyn Fn(u32) + Send + Sync)>,
+) -> Result<ExecutionResult> {
     // Ensure working dir and log dir exist
     tokio::fs::create_dir_all(&job.working_dir)
         .await
@@ -127,16 +154,23 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
 
     let mut child = cmd.spawn().map_err(BooError::Io)?;
 
-    if let Some(bytes) = runner.stdin_bytes(job) {
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(&bytes).await;
-            drop(stdin);
-        }
-    } else {
-        drop(child.stdin.take());
+    if let (Some(callback), Some(pid)) = (on_spawn, child.id()) {
+        callback(pid);
     }
 
     let result = tokio::time::timeout(Duration::from_secs(timeout_secs), async {
+        // Stdin write must happen inside the timeout: a child that never
+        // reads stdin would otherwise block this task forever once the
+        // prompt exceeds the pipe buffer.
+        if let Some(bytes) = runner.stdin_bytes(job) {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(&bytes).await;
+                drop(stdin);
+            }
+        } else {
+            drop(child.stdin.take());
+        }
+
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
@@ -173,6 +207,9 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
         let response = strip_ansi(&out_buf);
         let response_path = log_path.with_extension("response");
         let _ = tokio::fs::write(&response_path, &response).await;
+        // Logs/transcripts can contain secrets the agent encountered
+        crate::config::restrict_file_permissions(log_path);
+        crate::config::restrict_file_permissions(&response_path);
 
         let status = child.wait().await.map_err(BooError::Io)?;
         Ok::<_, BooError>((status.code(), status.success(), response))
@@ -191,14 +228,17 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
         }),
         Ok(Err(e)) => Err(e),
         Err(_) => {
-            // Kill entire process group (child + all descendants)
-            #[cfg(unix)]
+            // Kill entire process group (child + all descendants), forcefully
             if let Some(id) = child.id() {
-                unsafe {
-                    libc::killpg(id as i32, libc::SIGKILL);
-                }
+                crate::kill_process_group(id, false);
             }
             let _ = child.kill().await;
+            // Leave a log behind so the failure is visible in `boo logs`
+            let _ = tokio::fs::write(
+                log_path,
+                format!("boo: job timed out after {timeout_secs}s; process killed\n"),
+            )
+            .await;
             Err(BooError::JobTimeout(timeout_secs))
         }
     }
@@ -227,6 +267,12 @@ mod tests {
         assert_eq!(strip_ansi(b"\x1b[38;5;141m> \x1b[0mHello\x07"), "> Hello");
         assert_eq!(strip_ansi(b"plain text"), "plain text");
         assert_eq!(strip_ansi(b"\x1b[1mBold\x1b[0m"), "Bold");
+        // OSC title sequences must not leak their payload
+        assert_eq!(
+            strip_ansi(b"\x1b]0;secret title\x07real output"),
+            "real output"
+        );
+        assert_eq!(strip_ansi(b"\x1b]0;title\x1b\\text"), "text");
     }
 
     #[tokio::test]
@@ -274,7 +320,7 @@ mod tests {
         let job = test_job();
         let dir = tempdir().unwrap();
         let log_path = dir.path().join("test.log");
-        let result = execute_job(&job, &test_config(), &log_path).await;
+        let result = execute_job(&job, &test_config(), &log_path, None).await;
         assert!(result.is_ok());
         let r = result.unwrap();
         assert!(r.response.is_some());
@@ -285,7 +331,9 @@ mod tests {
         let job = test_job();
         let dir = tempdir().unwrap();
         let log_path = dir.path().join("test.log");
-        let result = execute_job(&job, &test_config(), &log_path).await.unwrap();
+        let result = execute_job(&job, &test_config(), &log_path, None)
+            .await
+            .unwrap();
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert!(content.contains("chat"));
         assert!(result.success);

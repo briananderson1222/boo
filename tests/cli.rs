@@ -8,11 +8,29 @@ fn tmp() -> String {
     std::env::temp_dir().to_string_lossy().into_owned()
 }
 
-/// Create a boo command with an isolated home directory.
+/// Create a boo command with an isolated data directory.
+///
+/// BOO_HOME is the authoritative override; HOME/USERPROFILE are kept for
+/// good measure but dirs::home_dir() ignores env vars on Windows.
 fn boo_isolated(dir: &std::path::Path) -> Command {
     let mut cmd = boo();
-    cmd.env("HOME", dir).env("USERPROFILE", dir);
+    cmd.env("BOO_HOME", dir.join(".boo"))
+        .env("HOME", dir)
+        .env("USERPROFILE", dir)
+        .env("BOO_NO_NOTIFY", "1");
     cmd
+}
+
+/// Point kiro_cli_path at `echo` so `boo run` exercises the real executor
+/// end-to-end without needing kiro-cli installed.
+fn write_echo_config(dir: &std::path::Path) {
+    let boo_home = dir.join(".boo");
+    std::fs::create_dir_all(&boo_home).unwrap();
+    std::fs::write(
+        boo_home.join("config.json"),
+        r#"{"kiro_cli_path":"echo","default_timeout_secs":30,"max_log_runs":10,"heartbeat_secs":60}"#,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -346,7 +364,8 @@ fn test_parse_duration_via_every() {
 fn test_add_command_shell_job() {
     let dir = tempfile::tempdir().unwrap();
     let mut cmd = boo();
-    cmd.env("HOME", dir.path()).env("USERPROFILE", dir.path())
+    cmd.env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
         .args([
             "add",
             "--name",
@@ -365,7 +384,8 @@ fn test_add_command_shell_job() {
 fn test_add_no_prompt_no_command_fails() {
     let dir = tempfile::tempdir().unwrap();
     let mut cmd = boo();
-    cmd.env("HOME", dir.path()).env("USERPROFILE", dir.path())
+    cmd.env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
         .args(["add", "--name", "fail-test", "--every", "1h"])
         .assert()
         .failure()
@@ -377,7 +397,8 @@ fn test_list_format_json() {
     let dir = tempfile::tempdir().unwrap();
     // Add a job first
     boo()
-        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
         .args([
             "add",
             "--name",
@@ -391,11 +412,260 @@ fn test_list_format_json() {
         .success();
     // List as JSON
     boo()
-        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
         .args(["list", "--format", "json"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"name\": \"json-test\""));
+}
+
+#[test]
+fn test_add_multibyte_duration_rejected_gracefully() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args(["add", "--name", "mb", "--every", "5µ", "--prompt", "x"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid duration"));
+}
+
+#[test]
+fn test_edit_rejects_conflicting_schedules() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args(["add", "--name", "conf", "--every", "1h", "--prompt", "x"])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .args([
+            "edit",
+            "conf",
+            "--cron",
+            "0 9 * * *",
+            "--at",
+            "2099-01-01T00:00:00Z",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_run_end_to_end_saves_record_and_response() {
+    let dir = tempfile::tempdir().unwrap();
+    write_echo_config(dir.path());
+    boo_isolated(dir.path())
+        .args([
+            "add",
+            "--name",
+            "e2e",
+            "--every",
+            "1h",
+            "--prompt",
+            "hello",
+            "--dir",
+            &tmp(),
+        ])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .args(["run", "e2e"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("success=true"));
+    // A run record must now exist (regression guard for the failed-run and
+    // manual-run bookkeeping)
+    boo_isolated(dir.path())
+        .args(["logs", "e2e"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No run records").not());
+}
+
+#[test]
+fn test_url_run_requires_opt_in() {
+    let dir = tempfile::tempdir().unwrap();
+    write_echo_config(dir.path());
+    boo_isolated(dir.path())
+        .args([
+            "add",
+            "--name",
+            "urlgate",
+            "--every",
+            "1h",
+            "--command",
+            "echo hi",
+            "--dir",
+            &tmp(),
+        ])
+        .assert()
+        .success();
+    // Without opt-in, boo://run is rejected
+    boo_isolated(dir.path())
+        .arg("boo://run/urlgate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not URL-triggerable"));
+    // After opt-in it is accepted
+    boo_isolated(dir.path())
+        .args(["edit", "urlgate", "--allow-url-trigger", "true"])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .arg("boo://run/urlgate")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_url_resume_requires_target_and_opt_in() {
+    let dir = tempfile::tempdir().unwrap();
+    write_echo_config(dir.path());
+    // No job named → rejected (can't be gated, so never allowed from a URL)
+    boo_isolated(dir.path())
+        .arg("boo://resume")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("requires a job name"));
+    boo_isolated(dir.path())
+        .args([
+            "add",
+            "--name",
+            "resgate",
+            "--every",
+            "1h",
+            "--prompt",
+            "x",
+            "--dir",
+            &tmp(),
+        ])
+        .assert()
+        .success();
+    // Named but not opted in → rejected
+    boo_isolated(dir.path())
+        .arg("boo://resume/resgate?prompt=hi")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not URL-triggerable"));
+}
+
+#[test]
+fn test_add_rejects_invalid_runner() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args([
+            "add", "--name", "badrun", "--every", "1h", "--prompt", "x", "--runner", "shel",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Unknown runner"));
+}
+
+#[test]
+fn test_edit_rejects_missing_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args(["add", "--name", "edir", "--every", "1h", "--prompt", "x"])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .args(["edit", "edir", "--dir", "/nonexistent/path/xyz"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("does not exist"));
+}
+
+#[test]
+fn test_edit_toggles_delete_after_run_and_overlap() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args(["add", "--name", "toggles", "--every", "1h", "--prompt", "x"])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .args([
+            "edit",
+            "toggles",
+            "--delete-after-run",
+            "true",
+            "--allow-overlap",
+            "true",
+            "--allow-url-trigger",
+            "true",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("delete_after_run → true"))
+        .stdout(predicate::str::contains("allow_overlap → true"))
+        .stdout(predicate::str::contains("allow_url_trigger → true"));
+}
+
+#[test]
+fn test_failed_add_leaves_no_workspace_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    // Invalid cron fails after the workspace default is chosen — no
+    // directory must be left behind
+    boo_isolated(dir.path())
+        .args([
+            "add",
+            "--name",
+            "orphan",
+            "--cron",
+            "not-a-cron",
+            "--prompt",
+            "x",
+        ])
+        .assert()
+        .failure();
+    assert!(
+        !dir.path().join(".boo/workspace/orphan").exists(),
+        "failed add must not leave an orphan workspace dir"
+    );
+}
+
+#[test]
+fn test_clean_includes_disabled_oneshots() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args([
+            "add",
+            "--name",
+            "dis-oneshot",
+            "--at",
+            "2020-01-01T00:00:00Z",
+            "--prompt",
+            "x",
+        ])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .args(["disable", "dis-oneshot"])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .arg("clean")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dis-oneshot"));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_data_files_are_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args([
+            "add", "--name", "perm", "--every", "1h", "--prompt", "secret",
+        ])
+        .assert()
+        .success();
+    let jobs = dir.path().join(".boo/jobs.json");
+    let mode = std::fs::metadata(&jobs).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "jobs.json must be owner-only, got {mode:o}");
+    let boo_home = dir.path().join(".boo");
+    let dmode = std::fs::metadata(&boo_home).unwrap().permissions().mode() & 0o777;
+    assert_eq!(dmode, 0o700, "~/.boo must be owner-only, got {dmode:o}");
 }
 
 #[test]
@@ -412,14 +682,16 @@ fn test_run_new_window_flag_accepted() {
 fn test_list_format_csv() {
     let dir = tempfile::tempdir().unwrap();
     boo()
-        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
         .args([
             "add", "--name", "csv-test", "--every", "1h", "--prompt", "hello",
         ])
         .assert()
         .success();
     boo()
-        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
         .args(["list", "--format", "csv"])
         .assert()
         .success()
@@ -430,7 +702,8 @@ fn test_list_format_csv() {
 fn test_wait_not_running() {
     let dir = tempfile::tempdir().unwrap();
     boo()
-        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
         .args([
             "add",
             "--name",
@@ -443,7 +716,8 @@ fn test_wait_not_running() {
         .assert()
         .success();
     boo()
-        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
         .args(["wait", "wait-test"])
         .assert()
         .success()
@@ -500,7 +774,8 @@ fn test_running_json_empty() {
 fn test_kill_not_running() {
     let dir = tempfile::tempdir().unwrap();
     boo()
-        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
         .args([
             "add",
             "--name",
@@ -513,7 +788,8 @@ fn test_kill_not_running() {
         .assert()
         .success();
     boo()
-        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
         .args(["kill", "kill-test"])
         .assert()
         .success()
@@ -641,7 +917,8 @@ fn test_clean_keep_logs() {
 fn test_list_json_has_running_field() {
     let dir = tempfile::tempdir().unwrap();
     boo()
-        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
         .args([
             "add",
             "--name",
@@ -654,7 +931,8 @@ fn test_list_json_has_running_field() {
         .assert()
         .success();
     boo()
-        .env("HOME", dir.path()).env("USERPROFILE", dir.path())
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
         .args(["list", "--format", "json"])
         .assert()
         .success()

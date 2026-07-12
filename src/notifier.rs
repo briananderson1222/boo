@@ -2,39 +2,85 @@ use crate::executor::ExecutionResult;
 use crate::job::{self, Job};
 use crate::notification_service::{NotificationSender, NotifyRequest};
 
-/// Fire-and-forget HTTP POST to a webhook URL. Non-blocking, errors are silently ignored.
-pub fn notify_webhook(url: &str, event: serde_json::Value) {
+/// Webhook lifecycle events, serialized as {"event": "job.started", ...}.
+pub enum WebhookEvent<'a> {
+    Started,
+    /// Run finished executing — reports job.completed or job.failed based
+    /// on the exit status, with duration and resolved artifact.
+    Finished(&'a ExecutionResult),
+    /// Run errored before producing a result (timeout, spawn failure).
+    Errored(&'a str),
+}
+
+fn webhook_payload(job: &Job, event: &WebhookEvent) -> serde_json::Value {
+    let id = &job.id.to_string()[..8];
+    match event {
+        WebhookEvent::Started => serde_json::json!({
+            "event": "job.started",
+            "job": job.name,
+            "id": id,
+        }),
+        WebhookEvent::Finished(result) => {
+            let artifact = job
+                .open_artifact
+                .as_ref()
+                .and_then(|a| job::resolve_artifact(&job.working_dir, a))
+                .map(|p| p.to_string_lossy().to_string());
+            serde_json::json!({
+                "event": if result.success { "job.completed" } else { "job.failed" },
+                "job": job.name,
+                "id": id,
+                "success": result.success,
+                "duration_secs": result.duration_secs,
+                "artifact": artifact,
+            })
+        }
+        WebhookEvent::Errored(error) => serde_json::json!({
+            "event": "job.failed",
+            "job": job.name,
+            "id": id,
+            "error": error,
+        }),
+    }
+}
+
+/// POST a webhook event and wait for delivery. Use from CLI paths that exit
+/// right after — a spawned task would be dropped before the request leaves.
+pub async fn send_webhook_event(url: &str, job: &Job, event: WebhookEvent<'_>) {
+    if cfg!(test) {
+        return;
+    }
+    let body = webhook_payload(job, &event);
+    if let Err(e) = webhook_post(url, &body).await {
+        eprintln!("Webhook delivery to {url} failed: {e}");
+    }
+}
+
+/// Fire-and-forget webhook event for the long-lived daemon.
+pub fn spawn_webhook_event(url: &str, job: &Job, event: WebhookEvent<'_>) {
     if cfg!(test) {
         return;
     }
     let url = url.to_string();
-    let body = serde_json::to_string(&event).unwrap_or_default();
+    let body = webhook_payload(job, &event);
     tokio::spawn(async move {
-        let _ = webhook_post(&url, &body).await;
+        if let Err(e) = webhook_post(&url, &body).await {
+            eprintln!("Webhook delivery to {url} failed: {e}");
+        }
     });
 }
 
-async fn webhook_post(
-    url: &str,
-    body: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let url = url::Url::parse(url)?;
-    let host = url.host_str().unwrap_or("localhost");
-    let port = url
-        .port()
-        .unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
-    let path = if url.query().is_some() {
-        format!("{}?{}", url.path(), url.query().unwrap())
-    } else {
-        url.path().to_string()
-    };
-
-    let mut stream = tokio::net::TcpStream::connect((host, port)).await?;
-    let req = format!(
-        "POST {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        path, host, port, body.len(), body
-    );
-    tokio::io::AsyncWriteExt::write_all(&mut stream, req.as_bytes()).await?;
+async fn webhook_post(url: &str, body: &serde_json::Value) -> Result<(), reqwest::Error> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+    client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .body(body.to_string())
+        .send()
+        .await?
+        .error_for_status()?;
     Ok(())
 }
 

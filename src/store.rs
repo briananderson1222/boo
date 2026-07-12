@@ -3,7 +3,6 @@ use crate::error::{BooError, Result};
 use crate::is_pid_alive;
 use crate::job::{Job, RunRecord};
 use chrono::{DateTime, Utc};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -35,6 +34,9 @@ impl JobStore {
         std::fs::create_dir_all(&dir)?;
         let runs_dir = dir.join("runs");
         std::fs::create_dir_all(&runs_dir)?;
+        // Job prompts, trust flags and run transcripts are private
+        crate::config::restrict_dir_permissions(&dir);
+        crate::config::restrict_dir_permissions(&runs_dir);
         Ok(Self {
             jobs_path: dir.join("jobs.json"),
             lock_path: dir.join("jobs.lock"),
@@ -52,7 +54,7 @@ impl JobStore {
             .truncate(false)
             .write(true)
             .open(&self.lock_path)?;
-        lock_file.lock_exclusive()?;
+        lock_file.lock()?;
         let result = f();
         drop(lock_file);
         result
@@ -70,6 +72,7 @@ impl JobStore {
         let json = serde_json::to_string_pretty(jobs)?;
         let tmp = self.jobs_path.with_extension("tmp");
         std::fs::write(&tmp, &json)?;
+        crate::config::restrict_file_permissions(&tmp);
         std::fs::rename(&tmp, &self.jobs_path)?;
         Ok(())
     }
@@ -110,6 +113,20 @@ impl JobStore {
                 .ok_or(BooError::JobNotFound(job.id))?;
             jobs[pos] = job.clone();
             self.write_jobs_unlocked(&jobs)
+        })
+    }
+
+    /// Atomically set only last_run, preserving any concurrent edits to the
+    /// job (schedule, enabled, prompt...) made while a run was in flight.
+    /// No-op if the job was deleted mid-run.
+    pub fn set_last_run(&self, id: Uuid, t: DateTime<Utc>) -> Result<()> {
+        self.with_lock(|| {
+            let mut jobs = self.read_jobs_unlocked()?;
+            if let Some(job) = jobs.iter_mut().find(|j| j.id == id) {
+                job.last_run = Some(t);
+                self.write_jobs_unlocked(&jobs)?;
+            }
+            Ok(())
         })
     }
 

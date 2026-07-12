@@ -1,6 +1,6 @@
 [package]
 name = "boo"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 description = "Cross-platform scheduler daemon for kiro-cli prompts"
 
@@ -11,19 +11,19 @@ clap = { version = "4.5.60", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
 uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "6"
-fs2 = "0.4"
 thiserror = "2"
 glob = "0.3.3"
-url = "2"
 user-notify = "0.4.2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.59", features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [dev-dependencies]
 proptest = "1"

@@ -56,6 +56,10 @@ pub struct Job {
     /// Optional human-readable description of what this job does.
     #[serde(default)]
     pub description: Option<String>,
+    /// Allow boo:// URL links to run/resume this job (opt-in: any web page
+    /// can fire such links once the URL handler is installed).
+    #[serde(default)]
+    pub allow_url_trigger: bool,
 }
 
 fn default_retry_delay() -> u64 {
@@ -110,6 +114,7 @@ impl Job {
             runner: None,
             command: None,
             description: None,
+            allow_url_trigger: false,
         }
     }
 

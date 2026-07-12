@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-07-12
+
+Audit-driven hardening pass across correctness, security, dependencies, and docs.
+
+### Bug Fixes
+- `boo kill` now signals the actual job's process group. Active runs recorded the daemon's own PID, so kill hit the daemon and orphaned the child.
+- Concurrent `boo edit`/`boo disable` during a run are no longer reverted: post-run bookkeeping re-reads under the lock and updates only `last_run`.
+- Timed-out or spawn-failed runs now write a run record, advance `last_run`, and respect retry — previously they refired every heartbeat forever with no log entry.
+- `boo edit --at` on a previously-run job fires again (schedule edits now reset `last_run` appropriately).
+- `missed_count` no longer counts the current fire (on-time runs report 0); `every` jobs report real missed intervals instead of a hardcoded 0.
+- `boo add --every "5µ"` and other multi-byte inputs error cleanly instead of panicking.
+- Webhooks actually speak HTTPS (via `reqwest`/rustls) instead of writing plaintext to port 443; delivery is awaited on CLI exit and failures are logged.
+- Windows CI is green: test isolation via `BOO_HOME` (the `dirs` crate ignores `HOME`/`USERPROFILE` on Windows).
+
+### Features
+- `--timezone` is now honored: cron/at schedules evaluate in the job's IANA timezone with DST, defaulting to UTC. Unknown zones are rejected.
+- `--allow-overlap` and `--allow-url-trigger` flags on `add`/`edit`; `edit` can toggle `--delete-after-run`.
+
+### Security
+- `boo://run` and `boo://resume` require per-job `allow_url_trigger` (default off): any web page can open such links, so a job must opt in.
+- On Unix, `~/.boo` is created `0700` and job/config/log files are written `0600` (prompts, webhook secrets, and transcripts were world-readable).
+- Daemon handles SIGTERM (not just SIGINT) so `launchctl unload`/`systemctl stop` run the graceful drain and pid cleanup.
+- `strip_ansi` strips OSC sequences, which were leaking terminal-title payloads into `.response` files.
+- CI: `release.yml` `contents: write` scoped to the release job; third-party actions pinned to commit SHAs; Dependabot added for monthly action/cargo updates.
+
+### Dependencies
+- Dropped unmaintained `fs2` for std file locking; bumped `windows` 0.59 → 0.62; added `chrono-tz` and `reqwest`; removed now-unused `url`.
+- `Cargo.lock` is now committed (reproducible builds, auditable dependencies).
+
+### Refactor
+- `cmd_add`/`cmd_edit` take typed `AddArgs`/`EditArgs` structs instead of 20+ positional parameters.
+- Single `kill_process_group` and `WebhookEvent` helpers replace duplicated unsafe-kill and webhook-JSON blocks. `--runner` is validated against `{kiro, shell}`.
+
+### CI recipes (feat/kiro-ci-recipes-bootstrap)
+- Fixed `/open-issue <n>` selecting the wrong finding, the dead "no review found" guard, and the missing `code-review` label.
+- Agent configs point at Rust sources; the reusable-action step passes inputs via `env:` (script-injection hardening); fork PRs skip cleanly; shared workflow scaffolding consolidated into a reusable workflow.
+
 ## [0.5.0] - 2026-04-07
 
 ### Features
