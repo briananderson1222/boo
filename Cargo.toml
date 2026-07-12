@@ -2,7 +2,14 @@
 name = "boo"
 version = "0.6.0"
 edition = "2021"
-description = "Cross-platform scheduler daemon for kiro-cli prompts"
+description = "Cross-platform scheduler daemon that fires AI-agent CLI prompts (kiro-cli) and shell commands on cron/at/every schedules"
+authors = ["Brian Anderson"]
+license = "MIT"
+repository = "https://github.com/briananderson1222/boo"
+homepage = "https://github.com/briananderson1222/boo"
+readme = "README.md"
+keywords = ["scheduler", "cron", "daemon", "cli", "automation"]
+categories = ["command-line-utilities", "date-and-time"]
 
 [dependencies]
 croner = "3"

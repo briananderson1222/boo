@@ -1,0 +1,3 @@
+# Default owner for everything in the repo.
+# Used to auto-request review on pull requests.
+*       @briananderson1222
