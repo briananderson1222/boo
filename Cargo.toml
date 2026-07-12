@@ -1,6 +1,6 @@
 [package]
 name = "boo"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 description = "Cross-platform scheduler daemon that fires AI-agent CLI prompts (kiro-cli) and shell commands on cron/at/every schedules"
 authors = ["Brian Anderson"]
