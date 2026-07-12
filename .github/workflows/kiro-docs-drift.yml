@@ -1,0 +1,22 @@
+name: Kiro Docs Drift
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  docs-drift:
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/kiro-review-reusable.yml
+    with:
+      agent: docs-drift-reviewer
+      review-kind: documentation drift review
+      strict: "false"
+      post-mode: pr-comment
+    secrets:
+      KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}

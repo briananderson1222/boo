@@ -1,0 +1,22 @@
+name: Kiro Security Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  security-review:
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+    uses: ./.github/workflows/kiro-review-reusable.yml
+    with:
+      agent: security-reviewer
+      review-kind: security review
+      strict: "true"
+      post-mode: artifact-fail-on-critical
+      artifact-name: kiro-security-review
+    secrets:
+      KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}

@@ -1,0 +1,22 @@
+name: Kiro Test Gap Finder
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  test-gap-review:
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/kiro-review-reusable.yml
+    with:
+      agent: test-gap-finder
+      review-kind: test gap review
+      strict: "false"
+      post-mode: pr-comment
+    secrets:
+      KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
