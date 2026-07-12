@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Features
+- Two more runners: `pi` ([pi coding agent](https://github.com/earendil-works/pi), `pi -p`) and `opencode` ([opencode](https://opencode.ai), `opencode run`). Both support `--model`, tool trust where the CLI allows, batch execution, interactive resume, and natural-language `--at` — bringing the runner count to six (kiro, claude, codex, pi, opencode, shell).
+
 ## [0.7.0] - 2026-07-12
 
 Multi-harness support, a Kiro CI review suite, and a quality/security pass on top of the 0.6.0 audit hardening. First tagged release since v0.5.1.

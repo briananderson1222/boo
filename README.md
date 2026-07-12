@@ -79,6 +79,8 @@ Cron uses standard 5-field syntax and evaluates in UTC unless you pass `--timezo
 | `kiro` *(default)* | `kiro-cli chat` | Full support incl. `--agent` and interactive resume |
 | `claude` | `claude -p` (Claude Code headless) | `--trust-all-tools` → `--dangerously-skip-permissions`; `--trust-tools` → `--allowedTools`; `--agent` ignored |
 | `codex` | `codex exec` | `--trust-all-tools` bypasses the sandbox, else `--sandbox workspace-write`; `--agent`/`--trust-tools` ignored |
+| `pi` | `pi -p` ([pi](https://github.com/earendil-works/pi)) | `--trust-tools` → `--tools` (allowlist); `--agent` ignored |
+| `opencode` | `opencode run` ([opencode](https://opencode.ai)) | `--model` uses `provider/model`; `--agent` → `--agent`; `--trust-all-tools` → `--auto`; prompt passed as an argument |
 | `shell` | `sh -c` / `cmd /C` | Runs `--command` as a raw shell command — no AI needed |
 
 ```bash
@@ -92,7 +94,7 @@ boo add --name backup --runner shell --every 1d \
   --command "rsync -a ~/docs /backup/"
 ```
 
-Binary paths are configurable (`kiro_cli_path` / `claude_cli_path` / `codex_cli_path`); they default to the CLI name on `PATH`. Foreground interactive runs (`boo run --interactive`), session resume (`boo resume`), and natural-language `--at` parsing work for every runner — mapped to each CLI's own resume flags (kiro `--resume`, claude `--continue`, codex `resume --last`). Only `--new-window` and `boo://resume` deep links remain kiro-specific for now.
+Binary paths are configurable (`kiro_cli_path` / `claude_cli_path` / `codex_cli_path` / `pi_cli_path` / `opencode_cli_path`); they default to the CLI name on `PATH`. Foreground interactive runs (`boo run --interactive`), session resume (`boo resume`), and natural-language `--at` parsing work for every runner — mapped to each CLI's own resume flags (kiro `--resume`, claude `--continue`, codex `resume --last`). Only `--new-window` and `boo://resume` deep links remain kiro-specific for now.
 
 ## Features you'll use
 
@@ -143,7 +145,7 @@ Binary paths are configurable (`kiro_cli_path` / `claude_cli_path` / `codex_cli_
 | `--cron` / `--at` / `--every` | Schedule (exactly one) | required |
 | `--prompt` | Prompt piped to the runner via stdin | required (unless `--command`) |
 | `--command` | Raw shell command (implies `--runner shell`) | — |
-| `--runner` | `kiro` (default), `claude`, `codex`, `shell` | `kiro` |
+| `--runner` | `kiro` (default), `claude`, `codex`, `pi`, `opencode`, `shell` | `kiro` |
 | `--dir` | Working directory for the job | `~/.boo/workspace/<name>` |
 | `--agent` | Agent to use (kiro runner only) | default agent |
 | `--model` | Model override, passed to the runner's CLI | runner default |
@@ -169,6 +171,8 @@ Optional `~/.boo/config.json`:
   "kiro_cli_path": "kiro-cli",
   "claude_cli_path": "claude",
   "codex_cli_path": "codex",
+  "pi_cli_path": "pi",
+  "opencode_cli_path": "opencode",
   "default_timeout_secs": 300,
   "max_log_runs": 50,
   "heartbeat_secs": 60,
@@ -179,7 +183,7 @@ Optional `~/.boo/config.json`:
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `kiro_cli_path` / `claude_cli_path` / `codex_cli_path` | Binary for each runner | CLI name on `PATH` |
+| `kiro_cli_path` / `claude_cli_path` / `codex_cli_path` / `pi_cli_path` / `opencode_cli_path` | Binary for each runner | CLI name on `PATH` |
 | `default_timeout_secs` | Default job timeout | 300 |
 | `max_log_runs` | Log files kept per job | 50 |
 | `heartbeat_secs` | Daemon tick interval | 60 |

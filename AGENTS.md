@@ -19,7 +19,7 @@ src/
 ├── main.rs           # CLI entry point (clap) — 19 user commands + hidden internal-notify
 ├── scheduler.rs      # Heartbeat loop, job spawning, retry loop, delete-after-run, notification integration
 ├── store.rs          # Atomic JSON persistence with file locking (single lock scope per mutation)
-├── executor.rs       # Runner trait (Kiro/ClaudeCode/Codex/Shell runners), subprocess spawning, stdin piping, timeout + kill
+├── executor.rs       # Runner trait (Kiro/ClaudeCode/Codex/Pi/Opencode/Shell runners), subprocess spawning, stdin piping, timeout + kill
 ├── cron_eval.rs      # Schedule evaluation (cron/at/every), overdue detection, missed count
 ├── job.rs            # Job + RunRecord models with schedule types, runner/command, retry/notification fields
 ├── config.rs         # Global config (~/.boo/config.json), warns on malformed config
@@ -46,7 +46,7 @@ tests/
 - **Coalesced missed runs**: Fire once with `missed_count` metadata (capped at 1000)
 - **Daemon-direct notifications**: Daemon sends notifications from main thread (CFRunLoop) for reliable click/reply callbacks. `boo run` falls back to subprocess
 - **Clickable notifications**: Click opens artifact file; inline reply opens terminal with `boo resume`
-- **Runner trait** (the harness-neutral seam): `KiroRunner` (kiro-cli), `ClaudeCodeRunner` (`claude -p`), `CodexRunner` (`codex exec`), `ShellRunner` (raw commands). Each maps boo's generic job fields (`prompt`/`model`/`trust_all_tools`/`trust_tools`/`agent`) onto that CLI's flags. Adding a harness = impl the trait, register in `get_runner`, add to `VALID_RUNNERS`. Per-runner binary paths live in config (`kiro_cli_path`/`claude_cli_path`/`codex_cli_path`). **Still kiro-specific:** interactive resume (`launch_interactive_session`) and natural-language `--at` parsing — non-kiro jobs are refused for interactive runs rather than silently launching kiro-cli.
+- **Runner trait** (the harness-neutral seam): `KiroRunner` (kiro-cli), `ClaudeCodeRunner` (`claude -p`), `CodexRunner` (`codex exec`), `PiRunner` (`pi -p`), `OpencodeRunner` (`opencode run`), `ShellRunner` (raw commands). Each maps boo's generic job fields (`prompt`/`model`/`trust_all_tools`/`trust_tools`/`agent`) onto that CLI's flags. Adding a harness = impl the trait, register in `get_runner`, add to `VALID_RUNNERS`, add a `<name>_cli_path` config field. Interactive resume (`interactive_command`) and NL `--at` (`parse_at_time`) are runner-aware too; only `--new-window` and `boo://resume` stay kiro-specific.
 - **URL scheme**: `boo://` deep links handled by BooURL.app (Swift, compiled at install time)
 - **BOO_JOB_NAME env var**: Set on spawned kiro-cli so agents know which job they're running as
 - **Batched start notifications**: Multiple jobs firing in same tick send individual start notifications (one per job)

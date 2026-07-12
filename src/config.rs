@@ -17,6 +17,14 @@ pub struct Config {
     #[serde(default = "default_codex_path")]
     pub codex_cli_path: String,
 
+    /// Path to the pi CLI binary. Used by the `pi` runner.
+    #[serde(default = "default_pi_path")]
+    pub pi_cli_path: String,
+
+    /// Path to the opencode CLI binary. Used by the `opencode` runner.
+    #[serde(default = "default_opencode_path")]
+    pub opencode_cli_path: String,
+
     /// Default job timeout in seconds
     #[serde(default = "default_timeout")]
     pub default_timeout_secs: u64,
@@ -47,6 +55,12 @@ fn default_claude_path() -> String {
 fn default_codex_path() -> String {
     "codex".to_string()
 }
+fn default_pi_path() -> String {
+    "pi".to_string()
+}
+fn default_opencode_path() -> String {
+    "opencode".to_string()
+}
 fn default_timeout() -> u64 {
     300
 }
@@ -63,6 +77,8 @@ impl Default for Config {
             kiro_cli_path: default_kiro_path(),
             claude_cli_path: default_claude_path(),
             codex_cli_path: default_codex_path(),
+            pi_cli_path: default_pi_path(),
+            opencode_cli_path: default_opencode_path(),
             default_timeout_secs: default_timeout(),
             max_log_runs: default_max_log_runs(),
             heartbeat_secs: default_heartbeat_secs(),
@@ -230,5 +246,7 @@ mod tests {
         let loaded: Config = serde_json::from_str(json).unwrap();
         assert_eq!(loaded.claude_cli_path, "claude");
         assert_eq!(loaded.codex_cli_path, "codex");
+        assert_eq!(loaded.pi_cli_path, "pi");
+        assert_eq!(loaded.opencode_cli_path, "opencode");
     }
 }
