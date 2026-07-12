@@ -84,7 +84,13 @@ jobs:
 
       - name: Install Kiro CLI
         run: |
-          curl -fsSL https://cli.kiro.dev/install | bash
+          # Download, record sha256 for auditability, then run — not a blind
+          # curl|bash. The vendor installer offers no version pinning.
+          curl -fsSL --proto '=https' --tlsv1.2 https://cli.kiro.dev/install -o kiro-install.sh
+          echo "kiro-cli installer sha256:"
+          sha256sum kiro-install.sh || shasum -a 256 kiro-install.sh
+          bash kiro-install.sh --channel stable
+          rm -f kiro-install.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Run Kiro fixer

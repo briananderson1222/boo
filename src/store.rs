@@ -71,8 +71,9 @@ impl JobStore {
     fn write_jobs_unlocked(&self, jobs: &[Job]) -> Result<()> {
         let json = serde_json::to_string_pretty(jobs)?;
         let tmp = self.jobs_path.with_extension("tmp");
-        std::fs::write(&tmp, &json)?;
-        crate::config::restrict_file_permissions(&tmp);
+        // Job prompts and trust flags are private; the temp file is created
+        // 0600 so the rename target inherits owner-only permissions.
+        crate::config::write_private(&tmp, json.as_bytes())?;
         std::fs::rename(&tmp, &self.jobs_path)?;
         Ok(())
     }

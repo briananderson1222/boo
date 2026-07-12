@@ -100,9 +100,8 @@ impl Config {
             restrict_dir_permissions(parent);
         }
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, json)?;
         // Config may hold webhook URLs, which are bearer-secret-equivalent
-        restrict_file_permissions(&path);
+        write_private(&path, json.as_bytes())?;
         Ok(())
     }
 
@@ -131,6 +130,32 @@ pub fn restrict_file_permissions(path: &std::path::Path) {
     }
     #[cfg(not(unix))]
     let _ = path;
+}
+
+/// Write a file that holds sensitive data (prompts, webhook URLs) with
+/// owner-only (0600) permissions on Unix. New files are created 0600 from the
+/// start — no window where fresh content sits world-readable before a chmod.
+pub fn write_private(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        f.write_all(contents)?;
+        // Covers a pre-existing (legacy 0644) file, whose mode create() leaves
+        // untouched.
+        restrict_file_permissions(path);
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, contents)
+    }
 }
 
 /// Returns the boo data directory: $BOO_HOME if set, else ~/.boo/
@@ -178,6 +203,23 @@ mod tests {
         assert_eq!(loaded.default_timeout_secs, config.default_timeout_secs);
         assert_eq!(loaded.claude_cli_path, config.claude_cli_path);
         assert_eq!(loaded.codex_cli_path, config.codex_cli_path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_write_private_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("boo-wp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("secret.json");
+        write_private(&path, b"{\"webhook\":\"secret\"}").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "write_private must create 0600, got {mode:o}");
+        // Overwriting an existing file keeps it 0600.
+        write_private(&path, b"{}").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
