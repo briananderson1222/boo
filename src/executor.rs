@@ -22,7 +22,18 @@ fn strip_ansi(s: &[u8]) -> String {
         .to_string()
 }
 
-/// A runner knows how to build a command and prepare stdin for a job.
+/// A runner adapts a boo `Job` to a specific agent/shell CLI: it builds the
+/// non-interactive command to run and supplies the prompt (usually via stdin).
+///
+/// This is the seam that makes boo harness-neutral. Each runner maps boo's
+/// generic job fields — `prompt`, `model`, `trust_all_tools`/`trust_tools`,
+/// `agent` — onto that CLI's own flags. Adding a new agent CLI is: implement
+/// this trait, register it in [`get_runner`], and add its name to
+/// [`VALID_RUNNERS`].
+///
+/// Note: this covers the scheduled/batch execution path only. Interactive
+/// resume (`boo run --interactive`, `boo://resume`) and natural-language
+/// `--at` parsing are still kiro-cli specific (see `main.rs`).
 pub trait Runner: Send + Sync {
     fn build_command(&self, job: &Job, config: &Config) -> Command;
     fn stdin_bytes(&self, job: &Job) -> Option<Vec<u8>>;
@@ -47,6 +58,76 @@ impl Runner for KiroRunner {
         if let Some(ref model) = job.model {
             cmd.args(["--model", model]);
         }
+        cmd.current_dir(&job.working_dir);
+        cmd.env("BOO_NON_INTERACTIVE", "1");
+        cmd.env("BOO_JOB_NAME", &job.name);
+        cmd
+    }
+
+    fn stdin_bytes(&self, job: &Job) -> Option<Vec<u8>> {
+        Some(job.prompt.as_bytes().to_vec())
+    }
+}
+
+/// Runs prompts via the Claude Code CLI (`claude -p`, headless print mode).
+///
+/// Field mapping: `model` → `--model`; `trust_all_tools` →
+/// `--dangerously-skip-permissions`; `trust_tools` (comma/space list) →
+/// `--allowedTools` (tool names are Claude Code's, e.g. `Read`, `Bash(git*)`,
+/// so provide runner-appropriate values). `agent` has no Claude Code CLI
+/// equivalent and is ignored (Claude Code agents are file-based under
+/// `.claude/agents/`).
+pub struct ClaudeCodeRunner;
+
+impl Runner for ClaudeCodeRunner {
+    fn build_command(&self, job: &Job, config: &Config) -> Command {
+        let mut cmd = Command::new(&config.claude_cli_path);
+        cmd.args(["-p", "--output-format", "text"]);
+        if let Some(ref model) = job.model {
+            cmd.args(["--model", model]);
+        }
+        if job.trust_all_tools {
+            cmd.arg("--dangerously-skip-permissions");
+        } else if let Some(ref tools) = job.trust_tools {
+            // --allowedTools takes a space-separated list; accept either
+            // comma- or space-separated input and pass each as a value.
+            cmd.arg("--allowedTools");
+            cmd.args(tools.split([',', ' ']).filter(|s| !s.is_empty()));
+        }
+        cmd.current_dir(&job.working_dir);
+        cmd.env("BOO_NON_INTERACTIVE", "1");
+        cmd.env("BOO_JOB_NAME", &job.name);
+        cmd
+    }
+
+    fn stdin_bytes(&self, job: &Job) -> Option<Vec<u8>> {
+        Some(job.prompt.as_bytes().to_vec())
+    }
+}
+
+/// Runs prompts via the Codex CLI (`codex exec`, non-interactive).
+///
+/// Field mapping: `model` → `-m`; `trust_all_tools` →
+/// `--dangerously-bypass-approvals-and-sandbox`, otherwise the sandbox is
+/// `workspace-write` so a scheduled job can write in its working dir without
+/// approval prompts. `trust_tools` and `agent` have no direct Codex exec
+/// equivalent and are ignored. The prompt is read from stdin (`exec -`).
+pub struct CodexRunner;
+
+impl Runner for CodexRunner {
+    fn build_command(&self, job: &Job, config: &Config) -> Command {
+        let mut cmd = Command::new(&config.codex_cli_path);
+        cmd.args(["exec", "--skip-git-repo-check"]);
+        if let Some(ref model) = job.model {
+            cmd.args(["-m", model]);
+        }
+        if job.trust_all_tools {
+            cmd.arg("--dangerously-bypass-approvals-and-sandbox");
+        } else {
+            cmd.args(["--sandbox", "workspace-write"]);
+        }
+        // "-" makes codex read the prompt from stdin.
+        cmd.arg("-");
         cmd.current_dir(&job.working_dir);
         cmd.env("BOO_NON_INTERACTIVE", "1");
         cmd.env("BOO_JOB_NAME", &job.name);
@@ -89,7 +170,7 @@ impl Runner for ShellRunner {
 
 /// Known runner names. A `None`/unset runner defaults to kiro (or shell when a
 /// raw command is set).
-pub const VALID_RUNNERS: &[&str] = &["kiro", "shell"];
+pub const VALID_RUNNERS: &[&str] = &["kiro", "claude", "codex", "shell"];
 
 /// Validate a `--runner` value, so a typo like "shel" is rejected at add/edit
 /// time instead of silently falling back to the kiro runner.
@@ -108,6 +189,10 @@ pub fn validate_runner(runner: &str) -> Result<()> {
 pub fn get_runner(job: &Job) -> Box<dyn Runner> {
     match job.runner.as_deref() {
         Some("shell") => Box::new(ShellRunner),
+        Some("claude") => Box::new(ClaudeCodeRunner),
+        Some("codex") => Box::new(CodexRunner),
+        Some("kiro") => Box::new(KiroRunner),
+        // No runner set: a raw --command implies shell, otherwise kiro.
         _ if job.command.is_some() => Box::new(ShellRunner),
         _ => Box::new(KiroRunner),
     }
@@ -313,6 +398,92 @@ mod tests {
         job.runner = Some("shell".into());
         let runner = get_runner(&job);
         assert!(runner.stdin_bytes(&job).is_none());
+    }
+
+    /// Extract (program, args) from a built Command for assertions.
+    fn cmd_parts(cmd: &Command) -> (String, Vec<String>) {
+        let std = cmd.as_std();
+        let prog = std.get_program().to_string_lossy().to_string();
+        let args = std
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        (prog, args)
+    }
+
+    #[test]
+    fn test_claude_runner_command_shape() {
+        let mut job = test_job();
+        job.runner = Some("claude".into());
+        job.model = Some("claude-sonnet-4-5".into());
+        job.trust_all_tools = true;
+        let runner = get_runner(&job);
+        let (prog, args) = cmd_parts(&runner.build_command(&job, &test_config()));
+        assert!(prog.ends_with("echo")); // stubbed claude_cli_path
+        assert!(args.contains(&"-p".to_string()));
+        assert_eq!(
+            args.iter()
+                .position(|a| a == "--model")
+                .map(|i| &args[i + 1]),
+            Some(&"claude-sonnet-4-5".to_string())
+        );
+        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
+        // Claude Code reads the prompt from stdin
+        assert!(runner.stdin_bytes(&job).is_some());
+    }
+
+    #[test]
+    fn test_claude_runner_allowed_tools() {
+        let mut job = test_job();
+        job.runner = Some("claude".into());
+        job.trust_tools = Some("Read,Grep".into());
+        let runner = get_runner(&job);
+        let (_p, args) = cmd_parts(&runner.build_command(&job, &test_config()));
+        assert!(args.contains(&"--allowedTools".to_string()));
+        assert!(args.contains(&"Read".to_string()));
+        assert!(args.contains(&"Grep".to_string()));
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_string()));
+    }
+
+    #[test]
+    fn test_codex_runner_command_shape() {
+        let mut job = test_job();
+        job.runner = Some("codex".into());
+        job.model = Some("gpt-5-codex".into());
+        let runner = get_runner(&job);
+        let (prog, args) = cmd_parts(&runner.build_command(&job, &test_config()));
+        assert!(prog.ends_with("echo")); // stubbed codex_cli_path
+        assert!(args.contains(&"exec".to_string()));
+        assert!(args.contains(&"--skip-git-repo-check".to_string()));
+        assert_eq!(
+            args.iter().position(|a| a == "-m").map(|i| &args[i + 1]),
+            Some(&"gpt-5-codex".to_string())
+        );
+        // Default (non-trust-all) job runs sandboxed and reads prompt from stdin
+        assert!(args.contains(&"--sandbox".to_string()));
+        assert!(args.contains(&"workspace-write".to_string()));
+        assert!(args.contains(&"-".to_string()));
+        assert!(runner.stdin_bytes(&job).is_some());
+    }
+
+    #[test]
+    fn test_codex_runner_trust_all_bypasses_sandbox() {
+        let mut job = test_job();
+        job.runner = Some("codex".into());
+        job.trust_all_tools = true;
+        let runner = get_runner(&job);
+        let (_p, args) = cmd_parts(&runner.build_command(&job, &test_config()));
+        assert!(args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
+        assert!(!args.contains(&"workspace-write".to_string()));
+    }
+
+    #[test]
+    fn test_new_runners_validate() {
+        assert!(validate_runner("claude").is_ok());
+        assert!(validate_runner("codex").is_ok());
+        assert!(validate_runner("kiro").is_ok());
+        assert!(validate_runner("shell").is_ok());
+        assert!(validate_runner("gemini").is_err());
     }
 
     #[tokio::test]

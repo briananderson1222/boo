@@ -111,6 +111,8 @@ pub mod test_helpers {
     pub fn test_config() -> Config {
         Config {
             kiro_cli_path: "echo".to_string(),
+            claude_cli_path: "echo".to_string(),
+            codex_cli_path: "echo".to_string(),
             default_timeout_secs: 5,
             max_log_runs: 10,
             heartbeat_secs: 60,
