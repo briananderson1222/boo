@@ -1,0 +1,48 @@
+name: Kiro Artifact Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: Local Kiro agent to run.
+        required: false
+        default: code-reviewer
+      base_ref:
+        description: Diff base ref.
+        required: false
+        default: origin/main
+      strict:
+        description: Fail if Kiro omits or returns malformed REVIEW_DATA.
+        required: false
+        default: "false"
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: workspace
+
+      - name: Run Kiro artifact review
+        id: kiro
+        uses: ./workspace/.github/actions/kiro-review
+        env:
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+        with:
+          agent: ${{ inputs.agent }}
+          base-ref: ${{ inputs.base_ref }}
+          review-kind: artifact-only review
+          strict: ${{ inputs.strict }}
+          workdir: workspace
+
+      - name: Upload review artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiro-artifact-review
+          path: |
+            ${{ steps.kiro.outputs.review_markdown_path }}
+            ${{ steps.kiro.outputs.review_json_path }}
