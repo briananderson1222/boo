@@ -23,9 +23,10 @@ export function normalizeReviewOutput(rawMarkdown, options = {}) {
     ? normalizeFindings(payload.value, { strict, warnings })
     : [];
   const uniqueFindings = dedupeFindings(findings, warnings);
+  const displayFindings = sortForDisplay(uniqueFindings);
   const document = {
-    findings: uniqueFindings,
-    counts: countFindings(uniqueFindings),
+    findings: displayFindings,
+    counts: countFindings(displayFindings),
     warnings,
     source: {
       rawMarkdownPath,
@@ -166,6 +167,21 @@ function dedupeFindings(findings, warnings) {
   return unique;
 }
 
+function sortForDisplay(findings) {
+  // Findings must be sorted here, before they are embedded in REVIEW_DATA,
+  // so that the visible numbering in renderVisibleReview() matches the
+  // array index that scripts/select-review-finding.mjs uses to resolve
+  // "/open-issue <number>". Blockers (CRITICAL/HIGH) render first, so they
+  // must also sort first; relative order within each group is preserved.
+  const blockers = findings.filter((finding) => isBlocker(finding));
+  const others = findings.filter((finding) => !isBlocker(finding));
+  return [...blockers, ...others];
+}
+
+function isBlocker(finding) {
+  return finding.severity === "CRITICAL" || finding.severity === "HIGH";
+}
+
 function countFindings(findings) {
   const counts = { total: findings.length, critical: 0, high: 0, medium: 0, low: 0 };
   for (const finding of findings) {
@@ -194,12 +210,8 @@ function renderVisibleReview(document, title) {
     ].join("\n");
   }
 
-  const blockers = document.findings.filter((finding) => {
-    return finding.severity === "CRITICAL" || finding.severity === "HIGH";
-  });
-  const others = document.findings.filter((finding) => {
-    return finding.severity !== "CRITICAL" && finding.severity !== "HIGH";
-  });
+  const blockers = document.findings.filter((finding) => isBlocker(finding));
+  const others = document.findings.filter((finding) => !isBlocker(finding));
   const heading = blockers.length > 0
     ? `## ${title} - Changes Requested`
     : `## ${title} - Comments`;
