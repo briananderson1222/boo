@@ -215,7 +215,7 @@ impl Runner for ShellRunner {
 
 /// Known runner names. A `None`/unset runner defaults to kiro (or shell when a
 /// raw command is set).
-pub const VALID_RUNNERS: &[&str] = &["kiro", "claude", "codex", "pi", "opencode", "shell"];
+pub const VALID_RUNNERS: &[&str] = &["kiro", "claude", "codex", "pi", "opencode", "acp", "shell"];
 
 /// Validate a `--runner` value, so a typo like "shel" is rejected at add/edit
 /// time instead of silently falling back to the kiro runner.
@@ -265,6 +265,12 @@ pub async fn execute_job(
         tokio::fs::create_dir_all(parent)
             .await
             .map_err(BooError::Io)?;
+    }
+
+    // The ACP runner speaks a JSON-RPC protocol rather than a one-shot CLI, so
+    // it has its own execution path.
+    if job.runner.as_deref() == Some("acp") {
+        return crate::acp::run_acp(job, config, log_path, on_spawn).await;
     }
 
     let runner = get_runner(job);

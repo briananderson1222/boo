@@ -5,7 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Features
-- Two more runners: `pi` ([pi coding agent](https://github.com/earendil-works/pi), `pi -p`) and `opencode` ([opencode](https://opencode.ai), `opencode run`). Both support `--model`, tool trust where the CLI allows, batch execution, interactive resume, and natural-language `--at` — bringing the runner count to six (kiro, claude, codex, pi, opencode, shell).
+- Two more runners: `pi` ([pi coding agent](https://github.com/earendil-works/pi), `pi -p`) and `opencode` ([opencode](https://opencode.ai), `opencode run`). Both support `--model`, tool trust where the CLI allows, batch execution, interactive resume, and natural-language `--at`.
+- Generic `acp` runner: speaks the [Agent Client Protocol](https://agentclientprotocol.com) (JSON-RPC over stdio) to **any** ACP agent — `acp_command` in config selects it (e.g. `"opencode acp"`, `"kiro-cli acp"`). Tool-permission requests are auto-answered per the job's trust flags (deny by default). Runner count is now seven (kiro, claude, codex, pi, opencode, acp, shell).
 
 ## [0.7.0] - 2026-07-12
 
