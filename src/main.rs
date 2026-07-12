@@ -594,6 +594,21 @@ async fn cmd_run(
         job.trust_tools = Some(tools.clone());
     }
 
+    // Interactive/resume sessions are still kiro-cli specific. Rather than
+    // silently launching kiro-cli for a claude/codex job, refuse clearly.
+    if interactive {
+        if let Some(r) = job.runner.as_deref() {
+            if r != "kiro" {
+                return Err(boo::error::BooError::Other(format!(
+                    "Interactive sessions are only supported for the kiro runner today \
+                     (job '{}' uses runner '{r}'). Run it non-interactively with \
+                     `boo run {}`.",
+                    job.name, job.name
+                )));
+            }
+        }
+    }
+
     if interactive && new_window {
         // Open in a new terminal window and return the job ID for tracking
         notifier::open_terminal_run(

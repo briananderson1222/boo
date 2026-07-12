@@ -68,6 +68,35 @@ boo add --name "calendar-check" \
   --timeout 180
 ```
 
+## Runners (agent harnesses)
+
+Boo isn't tied to a single CLI. `--runner` selects which harness executes a
+job's prompt (non-interactively, with the prompt piped to the CLI's stdin):
+
+| Runner | CLI | Notes |
+|--------|-----|-------|
+| `kiro` (default) | `kiro-cli chat --no-interactive` | Full support: `--agent`, `--model`, `--trust-all-tools`, `--trust-tools`, plus interactive resume. |
+| `claude` | `claude -p` (Claude Code headless) | `--model` → `--model`; `--trust-all-tools` → `--dangerously-skip-permissions`; `--trust-tools` → `--allowedTools`. `--agent` is ignored (Claude Code agents are file-based). |
+| `codex` | `codex exec` | `--model` → `-m`; `--trust-all-tools` → bypass sandbox, otherwise `--sandbox workspace-write`. `--agent`/`--trust-tools` are ignored. |
+| `shell` | `sh -c` / `cmd /C` | Runs `--command` (or `--prompt`) as a raw shell command. |
+
+```bash
+boo add --name "codex-audit" --runner codex \
+  --cron "0 7 * * 1" --prompt "Audit deps for CVEs" --model gpt-5-codex
+
+boo add --name "claude-brief" --runner claude \
+  --every 1d --prompt "Summarize yesterday's commits"
+```
+
+Each runner's binary path is configurable in `~/.boo/config.json`
+(`kiro_cli_path`, `claude_cli_path`, `codex_cli_path`); they default to
+`kiro-cli`, `claude`, and `codex` on `PATH`.
+
+> **Note:** interactive/resume (`boo run --interactive`, `boo://resume`) and
+> natural-language `--at` parsing currently work with the `kiro` runner only;
+> requesting an interactive run for a `claude`/`codex` job errors clearly
+> rather than falling back to kiro-cli.
+
 ## Commands
 
 | Command | Description |
@@ -101,12 +130,12 @@ boo add --name "calendar-check" \
 |--------|-------------|---------|
 | `--name` | Job name (must be unique) | required |
 | `--cron` / `--at` / `--every` | Schedule (exactly one required) | required |
-| `--prompt` | Prompt text sent to kiro-cli | required (unless `--command`) |
+| `--prompt` | Prompt text sent to the runner's CLI via stdin | required (unless `--command`) |
 | `--command` | Raw shell command (implies `--runner shell`) | — |
-| `--runner` | Runner type: `kiro` (default), `shell` | `kiro` |
-| `--dir` | Working directory for kiro-cli | `~/.boo/workspace/<name>` |
-| `--agent` | Kiro agent to use | default agent |
-| `--model` | Kiro model override | agent default |
+| `--runner` | Runner: `kiro` (default), `claude`, `codex`, `shell` | `kiro` |
+| `--dir` | Working directory for the job | `~/.boo/workspace/<name>` |
+| `--agent` | Agent to use (kiro runner only) | default agent |
+| `--model` | Model override, passed to the runner's CLI | runner default |
 | `--timezone` | IANA timezone for cron/at evaluation (e.g. `America/New_York`) | UTC |
 | `--timeout` | Max seconds before killing the job | 300 |
 | `--retry` | Max retry attempts on failure | 0 |
@@ -255,6 +284,8 @@ Optional config at `~/.boo/config.json`:
 ```json
 {
   "kiro_cli_path": "/usr/local/bin/kiro-cli",
+  "claude_cli_path": "claude",
+  "codex_cli_path": "codex",
   "default_timeout_secs": 300,
   "max_log_runs": 50,
   "heartbeat_secs": 60,
@@ -265,7 +296,9 @@ Optional config at `~/.boo/config.json`:
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `kiro_cli_path` | Path to kiro-cli binary | `kiro-cli` (from PATH) |
+| `kiro_cli_path` | Path to the kiro-cli binary (`kiro` runner) | `kiro-cli` (from PATH) |
+| `claude_cli_path` | Path to the Claude Code binary (`claude` runner) | `claude` (from PATH) |
+| `codex_cli_path` | Path to the Codex binary (`codex` runner) | `codex` (from PATH) |
 | `default_timeout_secs` | Default job timeout | 300 |
 | `max_log_runs` | Max log files kept per job | 50 |
 | `heartbeat_secs` | Daemon tick interval | 60 |

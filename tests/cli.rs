@@ -550,6 +550,124 @@ fn test_url_resume_requires_target_and_opt_in() {
 }
 
 #[test]
+fn test_add_accepts_claude_and_codex_runners() {
+    let dir = tempfile::tempdir().unwrap();
+    for runner in ["claude", "codex"] {
+        boo_isolated(dir.path())
+            .args([
+                "add",
+                "--name",
+                runner,
+                "--every",
+                "1h",
+                "--prompt",
+                "hi",
+                "--runner",
+                runner,
+                "--dir",
+                &tmp(),
+            ])
+            .assert()
+            .success();
+    }
+}
+
+#[test]
+fn test_interactive_rejected_for_non_kiro_runner() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args([
+            "add",
+            "--name",
+            "cj",
+            "--every",
+            "1h",
+            "--prompt",
+            "hi",
+            "--runner",
+            "claude",
+            "--dir",
+            &tmp(),
+        ])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .args(["run", "cj", "--interactive"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "only supported for the kiro runner",
+        ));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_claude_runner_invokes_cli_with_prompt_on_stdin() {
+    // Stub the claude binary with a script that records argv + stdin, proving
+    // boo drives an arbitrary agent CLI end-to-end (flags + piped prompt).
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let boo_home = dir.path().join(".boo");
+    std::fs::create_dir_all(&boo_home).unwrap();
+    let record = dir.path().join("invocation.txt");
+    let stub = dir.path().join("fake-claude.sh");
+    std::fs::write(
+        &stub,
+        format!(
+            "#!/bin/sh\necho \"ARGS: $*\" > '{rec}'\ncat >> '{rec}'\necho done\n",
+            rec = record.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        boo_home.join("config.json"),
+        format!(
+            r#"{{"claude_cli_path":"{}","default_timeout_secs":30,"max_log_runs":10,"heartbeat_secs":60}}"#,
+            stub.display()
+        ),
+    )
+    .unwrap();
+
+    boo_isolated(dir.path())
+        .args([
+            "add",
+            "--name",
+            "cs",
+            "--every",
+            "1h",
+            "--prompt",
+            "hello from boo",
+            "--runner",
+            "claude",
+            "--model",
+            "claude-sonnet-4-5",
+            "--dir",
+            &tmp(),
+        ])
+        .assert()
+        .success();
+    boo_isolated(dir.path())
+        .args(["run", "cs"])
+        .assert()
+        .success();
+
+    let recorded = std::fs::read_to_string(&record).unwrap();
+    assert!(
+        recorded.contains("-p"),
+        "should invoke print mode: {recorded}"
+    );
+    assert!(
+        recorded.contains("--model claude-sonnet-4-5"),
+        "should pass model: {recorded}"
+    );
+    assert!(
+        recorded.contains("hello from boo"),
+        "prompt should reach the CLI via stdin: {recorded}"
+    );
+}
+
+#[test]
 fn test_add_rejects_invalid_runner() {
     let dir = tempfile::tempdir().unwrap();
     boo_isolated(dir.path())
