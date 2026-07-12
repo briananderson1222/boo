@@ -438,6 +438,18 @@ fn test_edit_rejects_conflicting_schedules() {
 }
 
 #[test]
+fn test_add_rejects_invalid_runner() {
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args([
+            "add", "--name", "badrun", "--every", "1h", "--prompt", "x", "--runner", "shel",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Unknown runner"));
+}
+
+#[test]
 fn test_edit_rejects_missing_dir() {
     let dir = tempfile::tempdir().unwrap();
     boo_isolated(dir.path())

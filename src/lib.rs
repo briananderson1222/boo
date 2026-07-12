@@ -31,6 +31,41 @@ pub fn is_pid_alive(pid: u32) -> bool {
     }
 }
 
+/// Kill a process group (the process and all its descendants).
+///
+/// When `graceful` is true, sends SIGTERM first, waits up to 2s, then SIGKILLs
+/// if anything survives. When false, SIGKILLs immediately. On Windows this
+/// shells out to `taskkill /T /F` (always forceful).
+pub fn kill_process_group(pid: u32, graceful: bool) {
+    #[cfg(unix)]
+    {
+        unsafe {
+            if graceful {
+                if libc::killpg(pid as i32, libc::SIGTERM) != 0 {
+                    libc::kill(pid as i32, libc::SIGTERM);
+                }
+            } else {
+                libc::killpg(pid as i32, libc::SIGKILL);
+            }
+        }
+        if graceful {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if is_pid_alive(pid) {
+                unsafe {
+                    libc::killpg(pid as i32, libc::SIGKILL);
+                }
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = graceful;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output();
+    }
+}
+
 /// Strip ANSI escape sequences (CSI and OSC) and BEL characters from text.
 pub fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());

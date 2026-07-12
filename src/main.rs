@@ -888,6 +888,9 @@ async fn cmd_add(
     if let Some(ref tz) = timezone {
         cron_eval::parse_timezone(tz)?;
     }
+    if let Some(ref r) = runner {
+        executor::validate_runner(r)?;
+    }
     if let Some(ref cron_str) = cron {
         cron_eval::next_occurrence_tz(cron_str, Utc::now(), timezone.as_deref())?;
     }
@@ -1112,6 +1115,7 @@ async fn cmd_edit(
         }
     }
     if let Some(v) = runner {
+        executor::validate_runner(&v)?;
         job.runner = Some(v.clone());
         changes.push(format!("runner → {v}"));
     }
@@ -1564,29 +1568,7 @@ fn cmd_kill(target: &str) -> boo::error::Result<()> {
         }
         Some(run) => {
             println!("Killing '{}' (pid {})...", run.job_name, run.pid);
-            #[cfg(unix)]
-            {
-                // Kill the process group to get all descendants
-                unsafe {
-                    if libc::killpg(run.pid as i32, libc::SIGTERM) != 0 {
-                        // Fallback to direct kill
-                        libc::kill(run.pid as i32, libc::SIGKILL);
-                    }
-                }
-                // Give it a moment, then force kill if still alive
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                if boo::is_pid_alive(run.pid) {
-                    unsafe {
-                        libc::killpg(run.pid as i32, libc::SIGKILL);
-                    }
-                }
-            }
-            #[cfg(windows)]
-            {
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/PID", &run.pid.to_string(), "/T", "/F"])
-                    .output();
-            }
+            boo::kill_process_group(run.pid, true);
             store.remove_active_run(job.id);
             println!("Killed.");
             Ok(())

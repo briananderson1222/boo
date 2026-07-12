@@ -87,6 +87,23 @@ impl Runner for ShellRunner {
     }
 }
 
+/// Known runner names. A `None`/unset runner defaults to kiro (or shell when a
+/// raw command is set).
+pub const VALID_RUNNERS: &[&str] = &["kiro", "shell"];
+
+/// Validate a `--runner` value, so a typo like "shel" is rejected at add/edit
+/// time instead of silently falling back to the kiro runner.
+pub fn validate_runner(runner: &str) -> Result<()> {
+    if VALID_RUNNERS.contains(&runner) {
+        Ok(())
+    } else {
+        Err(BooError::Other(format!(
+            "Unknown runner '{runner}'. Valid runners: {}",
+            VALID_RUNNERS.join(", ")
+        )))
+    }
+}
+
 /// Get the appropriate runner for a job.
 pub fn get_runner(job: &Job) -> Box<dyn Runner> {
     match job.runner.as_deref() {
@@ -211,12 +228,9 @@ pub async fn execute_job(
         }),
         Ok(Err(e)) => Err(e),
         Err(_) => {
-            // Kill entire process group (child + all descendants)
-            #[cfg(unix)]
+            // Kill entire process group (child + all descendants), forcefully
             if let Some(id) = child.id() {
-                unsafe {
-                    libc::killpg(id as i32, libc::SIGKILL);
-                }
+                crate::kill_process_group(id, false);
             }
             let _ = child.kill().await;
             // Leave a log behind so the failure is visible in `boo logs`

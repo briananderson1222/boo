@@ -444,11 +444,9 @@ class D:NSObject,NSApplicationDelegate{{func application(_ a:NSApplication,open 
     std::fs::write(&src_path, &swift_src)?;
 
     let output = Command::new("swiftc")
-        .args([
-            src_path.to_str().unwrap(),
-            "-o",
-            macos_dir.join("BooURL").to_str().unwrap(),
-        ])
+        .arg(&src_path)
+        .arg("-o")
+        .arg(macos_dir.join("BooURL"))
         .output()?;
     if !output.status.success() {
         return Err(BooError::Other(format!(
