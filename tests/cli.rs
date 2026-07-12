@@ -525,6 +525,25 @@ fn test_clean_includes_disabled_oneshots() {
         .stdout(predicate::str::contains("dis-oneshot"));
 }
 
+#[cfg(unix)]
+#[test]
+fn test_data_files_are_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    boo_isolated(dir.path())
+        .args([
+            "add", "--name", "perm", "--every", "1h", "--prompt", "secret",
+        ])
+        .assert()
+        .success();
+    let jobs = dir.path().join(".boo/jobs.json");
+    let mode = std::fs::metadata(&jobs).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "jobs.json must be owner-only, got {mode:o}");
+    let boo_home = dir.path().join(".boo");
+    let dmode = std::fs::metadata(&boo_home).unwrap().permissions().mode() & 0o777;
+    assert_eq!(dmode, 0o700, "~/.boo must be owner-only, got {dmode:o}");
+}
+
 #[test]
 fn test_run_new_window_flag_accepted() {
     // Verify --new-window is a valid flag without actually opening a terminal

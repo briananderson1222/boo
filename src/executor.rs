@@ -190,6 +190,9 @@ pub async fn execute_job(
         let response = strip_ansi(&out_buf);
         let response_path = log_path.with_extension("response");
         let _ = tokio::fs::write(&response_path, &response).await;
+        // Logs/transcripts can contain secrets the agent encountered
+        crate::config::restrict_file_permissions(log_path);
+        crate::config::restrict_file_permissions(&response_path);
 
         let status = child.wait().await.map_err(BooError::Io)?;
         Ok::<_, BooError>((status.code(), status.success(), response))
@@ -250,6 +253,12 @@ mod tests {
         assert_eq!(strip_ansi(b"\x1b[38;5;141m> \x1b[0mHello\x07"), "> Hello");
         assert_eq!(strip_ansi(b"plain text"), "plain text");
         assert_eq!(strip_ansi(b"\x1b[1mBold\x1b[0m"), "Bold");
+        // OSC title sequences must not leak their payload
+        assert_eq!(
+            strip_ansi(b"\x1b]0;secret title\x07real output"),
+            "real output"
+        );
+        assert_eq!(strip_ansi(b"\x1b]0;title\x1b\\text"), "text");
     }
 
     #[tokio::test]

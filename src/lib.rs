@@ -31,20 +31,36 @@ pub fn is_pid_alive(pid: u32) -> bool {
     }
 }
 
-/// Strip ANSI escape sequences and BEL characters from text.
+/// Strip ANSI escape sequences (CSI and OSC) and BEL characters from text.
 pub fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '\x1b' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                while let Some(&nc) = chars.peek() {
+            match chars.peek() {
+                // CSI sequence: ESC [ ... <final alpha byte>
+                Some(&'[') => {
                     chars.next();
-                    if nc.is_ascii_alphabetic() {
-                        break;
+                    while let Some(nc) = chars.next() {
+                        if nc.is_ascii_alphabetic() {
+                            break;
+                        }
                     }
                 }
+                // OSC sequence: ESC ] ... terminated by BEL or ESC \
+                Some(&']') => {
+                    chars.next();
+                    while let Some(nc) = chars.next() {
+                        if nc == '\x07' {
+                            break;
+                        }
+                        if nc == '\x1b' && chars.peek() == Some(&'\\') {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                _ => {}
             }
         } else if c != '\x07' {
             out.push(c);

@@ -347,7 +347,8 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
             // URL scheme launches without a terminal — need to open one
             if let Some(t) = target {
                 let store = JobStore::new()?;
-                let _ = resolve_job(&store, t)?; // validate job exists
+                let job = resolve_job(&store, t)?;
+                require_url_trigger(&job)?;
                 boo::notifier::open_terminal_resume(t, prompt, previous);
                 Ok(())
             } else {
@@ -358,6 +359,9 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
             let target = parts
                 .get(1)
                 .ok_or_else(|| boo::error::BooError::Other("Missing job name in URL".into()))?;
+            let store = JobStore::new()?;
+            let job = resolve_job(&store, target)?;
+            require_url_trigger(&job)?;
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -393,6 +397,22 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
         _ => Err(boo::error::BooError::Other(format!(
             "Unknown URL action: {url}"
         ))),
+    }
+}
+
+/// Guard boo:// run/resume actions: any web page can open such a link, so a
+/// job must explicitly opt in via `allow_url_trigger` before a link click can
+/// execute it or inject a prompt into its agent session.
+fn require_url_trigger(job: &Job) -> boo::error::Result<()> {
+    if job.allow_url_trigger {
+        Ok(())
+    } else {
+        Err(boo::error::BooError::Other(format!(
+            "Job '{}' is not URL-triggerable. Enable it with:\n  \
+             boo edit '{}' --allow-url-trigger true\n\
+             (only for jobs you'd trust a link click to run)",
+            job.name, job.name
+        )))
     }
 }
 
@@ -611,7 +631,22 @@ fn cmd_daemon_blocking() -> boo::error::Result<()> {
         rt.block_on(async {
             let s2 = s.clone();
             tokio::spawn(async move {
-                let _ = tokio::signal::ctrl_c().await;
+                // Handle both Ctrl-C and SIGTERM (sent by launchctl unload /
+                // systemctl stop) so the graceful drain + pid cleanup run.
+                #[cfg(unix)]
+                {
+                    use tokio::signal::unix::{signal, SignalKind};
+                    let mut term =
+                        signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {}
+                        _ = term.recv() => {}
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = tokio::signal::ctrl_c().await;
+                }
                 s2.trigger_shutdown();
             });
             s.run().await;

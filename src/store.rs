@@ -34,6 +34,9 @@ impl JobStore {
         std::fs::create_dir_all(&dir)?;
         let runs_dir = dir.join("runs");
         std::fs::create_dir_all(&runs_dir)?;
+        // Job prompts, trust flags and run transcripts are private
+        crate::config::restrict_dir_permissions(&dir);
+        crate::config::restrict_dir_permissions(&runs_dir);
         Ok(Self {
             jobs_path: dir.join("jobs.json"),
             lock_path: dir.join("jobs.lock"),
@@ -69,6 +72,7 @@ impl JobStore {
         let json = serde_json::to_string_pretty(jobs)?;
         let tmp = self.jobs_path.with_extension("tmp");
         std::fs::write(&tmp, &json)?;
+        crate::config::restrict_file_permissions(&tmp);
         std::fs::rename(&tmp, &self.jobs_path)?;
         Ok(())
     }
