@@ -49,11 +49,14 @@ raw_output="$tmp_dir/raw-review.md"
 
 git diff "$base_ref"...HEAD > "$diff_file" 2>/dev/null || git diff "$base_ref" HEAD > "$diff_file"
 
+# The diff is written to a file and referenced by path rather than
+# embedded in the prompt argv: large PR diffs can exceed ARG_MAX if
+# interpolated directly into a single command-line argument.
 kiro-cli chat \
   --no-interactive \
   --trust-tools=read,grep \
   --agent "$agent" \
-  "Run a ${review_kind} for this diff. Return concise markdown findings.
+  "Run a ${review_kind} for this diff. The full unified diff has been written to the file at ${diff_file}. Use your read tool to read that file before evaluating; it is not included inline here. Return concise markdown findings.
 
 Your final line is mandatory automation data. End with exactly one single-line HTML comment matching this shape:
 <!-- REVIEW_DATA: [{\"severity\":\"HIGH\",\"confidence\":\"medium\",\"file\":\"src/app.js\",\"line\":1,\"description\":\"short actionable description\",\"source\":\"kiro\"}] -->
@@ -61,9 +64,7 @@ Your final line is mandatory automation data. End with exactly one single-line H
 If there are no findings, the final line must be exactly:
 <!-- REVIEW_DATA: [] -->
 
-Do not omit REVIEW_DATA. Do not wrap REVIEW_DATA in a code fence.
-
-$(cat "$diff_file")" > "$raw_output"
+Do not omit REVIEW_DATA. Do not wrap REVIEW_DATA in a code fence." > "$raw_output"
 
 node "$script_dir/normalize-review-output.mjs" "$raw_output" \
   --json "$output_json" \
