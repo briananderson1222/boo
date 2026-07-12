@@ -25,4 +25,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: bash scripts/test-review-scripts.sh
+      - run: node scripts/test-review-scripts.mjs

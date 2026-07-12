@@ -78,7 +78,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: ./trusted/scripts/post-pr-review.sh "${{ steps.kiro.outputs.review_markdown_path }}"
+        run: node ./trusted/scripts/post-pr-review.mjs "${{ steps.kiro.outputs.review_markdown_path }}"
 
       - name: Upload review artifact
         if: >-
