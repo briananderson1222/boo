@@ -2,7 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.8.0] - 2026-07-12
+
+More runners, including a generic Agent Client Protocol adapter.
 
 ### Features
 - Two more runners: `pi` ([pi coding agent](https://github.com/earendil-works/pi), `pi -p`) and `opencode` ([opencode](https://opencode.ai), `opencode run`). Both support `--model`, tool trust where the CLI allows, batch execution, interactive resume, and natural-language `--at`.
