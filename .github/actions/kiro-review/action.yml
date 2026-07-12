@@ -76,7 +76,7 @@ runs:
         review_workdir="$(cd "$WORKDIR" && pwd)"
         output_markdown="$OUTPUT_MARKDOWN"
         output_json="$OUTPUT_JSON"
-        trusted_agent="$trusted_root/.kiro/agents/$AGENT.json"
+        trusted_agent="$trusted_root/.kiro/agents/$AGENT.md"
 
         if [[ ! -f "$trusted_agent" ]]; then
           echo "Trusted Kiro agent not found: $trusted_agent" >&2
@@ -92,11 +92,11 @@ runs:
         fi
 
         mkdir -p "$review_workdir/.kiro/agents"
-        cp "$trusted_agent" "$review_workdir/.kiro/agents/$AGENT.json"
+        cp "$trusted_agent" "$review_workdir/.kiro/agents/$AGENT.md"
 
         cd "$review_workdir"
 
-        "$trusted_root/scripts/run-kiro-review.sh" \
+        node "$trusted_root/scripts/run-kiro-review.mjs" \
           --agent "$AGENT" \
           --base-ref "$BASE_REF" \
           --review-kind "$REVIEW_KIND" \

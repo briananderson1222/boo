@@ -79,7 +79,7 @@ jobs:
         run: |
           git checkout -b "kiro/pr-${{ github.event.issue.number }}/finding-${{ github.run_id }}"
           mkdir -p .kiro/agents
-          cp ../trusted/.kiro/agents/fix-branch-writer.json .kiro/agents/fix-branch-writer.json
+          cp ../trusted/.kiro/agents/fix-branch-writer.md .kiro/agents/fix-branch-writer.md
           cp ../selected-finding.json .kiro-selected-finding.json
 
       - name: Install Kiro CLI
