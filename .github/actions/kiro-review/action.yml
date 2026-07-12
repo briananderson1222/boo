@@ -57,17 +57,26 @@ runs:
     - name: Run Kiro review
       id: run-review
       shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        AGENT: ${{ inputs.agent }}
+        BASE_REF: ${{ inputs.base-ref }}
+        REVIEW_KIND: ${{ inputs.review-kind }}
+        OUTPUT_MARKDOWN: ${{ inputs.output-markdown }}
+        OUTPUT_JSON: ${{ inputs.output-json }}
+        STRICT: ${{ inputs.strict }}
+        WORKDIR: ${{ inputs.workdir }}
       run: |
         strict_args=()
-        if [[ "${{ inputs.strict }}" == "true" ]]; then
+        if [[ "$STRICT" == "true" ]]; then
           strict_args=(--strict)
         fi
 
-        trusted_root="$(cd "${{ github.action_path }}/../../.." && pwd)"
-        review_workdir="$(cd "${{ inputs.workdir }}" && pwd)"
-        output_markdown="${{ inputs.output-markdown }}"
-        output_json="${{ inputs.output-json }}"
-        trusted_agent="$trusted_root/.kiro/agents/${{ inputs.agent }}.json"
+        trusted_root="$(cd "$ACTION_PATH/../../.." && pwd)"
+        review_workdir="$(cd "$WORKDIR" && pwd)"
+        output_markdown="$OUTPUT_MARKDOWN"
+        output_json="$OUTPUT_JSON"
+        trusted_agent="$trusted_root/.kiro/agents/$AGENT.json"
 
         if [[ ! -f "$trusted_agent" ]]; then
           echo "Trusted Kiro agent not found: $trusted_agent" >&2
@@ -83,14 +92,14 @@ runs:
         fi
 
         mkdir -p "$review_workdir/.kiro/agents"
-        cp "$trusted_agent" "$review_workdir/.kiro/agents/${{ inputs.agent }}.json"
+        cp "$trusted_agent" "$review_workdir/.kiro/agents/$AGENT.json"
 
         cd "$review_workdir"
 
         "$trusted_root/scripts/run-kiro-review.sh" \
-          --agent "${{ inputs.agent }}" \
-          --base-ref "${{ inputs.base-ref }}" \
-          --review-kind "${{ inputs.review-kind }}" \
+          --agent "$AGENT" \
+          --base-ref "$BASE_REF" \
+          --review-kind "$REVIEW_KIND" \
           --output-markdown "$output_markdown" \
           --output-json "$output_json" \
           "${strict_args[@]}"
