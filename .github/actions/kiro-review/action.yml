@@ -51,7 +51,14 @@ runs:
     - name: Install Kiro CLI
       shell: bash
       run: |
-        curl -fsSL https://cli.kiro.dev/install | bash
+        # The vendor installer has no version pinning (channel-only, always
+        # "latest"), so we can't pin a checksum. Download to a file, record its
+        # sha256 for auditability, then run it — rather than a blind curl|bash.
+        curl -fsSL --proto '=https' --tlsv1.2 https://cli.kiro.dev/install -o kiro-install.sh
+        echo "kiro-cli installer sha256:"
+        sha256sum kiro-install.sh || shasum -a 256 kiro-install.sh
+        bash kiro-install.sh --channel stable
+        rm -f kiro-install.sh
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     - name: Run Kiro review
