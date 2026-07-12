@@ -518,6 +518,38 @@ fn test_url_run_requires_opt_in() {
 }
 
 #[test]
+fn test_url_resume_requires_target_and_opt_in() {
+    let dir = tempfile::tempdir().unwrap();
+    write_echo_config(dir.path());
+    // No job named → rejected (can't be gated, so never allowed from a URL)
+    boo_isolated(dir.path())
+        .arg("boo://resume")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("requires a job name"));
+    boo_isolated(dir.path())
+        .args([
+            "add",
+            "--name",
+            "resgate",
+            "--every",
+            "1h",
+            "--prompt",
+            "x",
+            "--dir",
+            &tmp(),
+        ])
+        .assert()
+        .success();
+    // Named but not opted in → rejected
+    boo_isolated(dir.path())
+        .arg("boo://resume/resgate?prompt=hi")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not URL-triggerable"));
+}
+
+#[test]
 fn test_add_rejects_invalid_runner() {
     let dir = tempfile::tempdir().unwrap();
     boo_isolated(dir.path())

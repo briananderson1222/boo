@@ -353,19 +353,23 @@ fn handle_url(url: &str) -> boo::error::Result<()> {
 
     match parts.first().copied() {
         Some("resume") => {
-            let target = parts.get(1).copied();
             let prompt = params.get("prompt").map(|s| s.as_str());
             let previous = params.get("previous").is_some_and(|v| v == "true");
+            // A URL must name a specific job so we can enforce its opt-in.
+            // The target-less `boo resume` picker is a CLI-only affordance:
+            // allowing it from a link would let any web page inject a prompt
+            // into an agent session with no job to vet.
+            let target = parts.get(1).copied().ok_or_else(|| {
+                boo::error::BooError::Other(
+                    "boo://resume requires a job name (boo://resume/<job>)".into(),
+                )
+            })?;
+            let store = JobStore::new()?;
+            let job = resolve_job(&store, target)?;
+            require_url_trigger(&job)?;
             // URL scheme launches without a terminal — need to open one
-            if let Some(t) = target {
-                let store = JobStore::new()?;
-                let job = resolve_job(&store, t)?;
-                require_url_trigger(&job)?;
-                boo::notifier::open_terminal_resume(t, prompt, previous);
-                Ok(())
-            } else {
-                cmd_resume(target, prompt, previous)
-            }
+            boo::notifier::open_terminal_resume(target, prompt, previous);
+            Ok(())
         }
         Some("run") => {
             let target = parts

@@ -58,7 +58,16 @@ pub fn is_overdue(job: &Job, now: DateTime<Utc>) -> bool {
     let reference = job.last_run.unwrap_or(job.created_at);
     match next_occurrence_tz(&job.cron_expr, reference, job.timezone.as_deref()) {
         Ok(next) => next <= now,
-        Err(_) => false,
+        Err(e) => {
+            // A job whose cron/timezone can't be evaluated would otherwise
+            // just stop firing forever with no signal — surface it so an
+            // operator watching the daemon log can see why.
+            eprintln!(
+                "boo: job '{}' has an unevaluable schedule and will not fire: {e}",
+                job.name
+            );
+            false
+        }
     }
 }
 
