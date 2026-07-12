@@ -169,10 +169,10 @@ fn install_linux(binary_path: &std::path::Path) -> Result<PathBuf> {
     // Register boo:// URL scheme via .desktop file
     let apps_dir = home.join(".local/share/applications");
     std::fs::create_dir_all(&apps_dir)?;
-    std::fs::write(apps_dir.join("boo-handler.desktop"), format!(
-        "[Desktop Entry]\nName=Boo\nExec={} %u\nType=Application\nNoDisplay=true\nMimeType=x-scheme-handler/boo;\n",
-        binary_path.display()
-    ))?;
+    std::fs::write(
+        apps_dir.join("boo-handler.desktop"),
+        linux_desktop_entry(binary_path),
+    )?;
     let _ = Command::new("xdg-mime")
         .args(["default", "boo-handler.desktop", "x-scheme-handler/boo"])
         .output();
@@ -231,6 +231,14 @@ fn is_installed_linux() -> bool {
 }
 
 #[cfg(target_os = "linux")]
+fn linux_desktop_entry(binary_path: &std::path::Path) -> String {
+    format!(
+        "[Desktop Entry]\nName=Boo\nExec={} %u\nType=Application\nNoDisplay=true\nMimeType=x-scheme-handler/boo;\n",
+        binary_path.display()
+    )
+}
+
+#[cfg(target_os = "linux")]
 fn print_crontab_instructions(binary_path: &std::path::Path) {
     println!("Systemd not available. To enable auto-start, add this line to your crontab:");
     println!("@reboot {}", binary_path.display());
@@ -239,6 +247,22 @@ fn print_crontab_instructions(binary_path: &std::path::Path) {
 
 #[cfg(target_os = "windows")]
 const TASK_NAME: &str = "BooScheduler";
+
+#[cfg(target_os = "windows")]
+fn windows_task_create_args(bin: &str) -> Vec<String> {
+    vec![
+        "/Create".into(),
+        "/TN".into(),
+        TASK_NAME.into(),
+        "/TR".into(),
+        format!("\"{}\" daemon", bin),
+        "/SC".into(),
+        "ONLOGON".into(),
+        "/RL".into(),
+        "LIMITED".into(),
+        "/F".into(),
+    ]
+}
 
 #[cfg(target_os = "windows")]
 fn install_windows(binary_path: &std::path::Path) -> Result<PathBuf> {
@@ -251,18 +275,7 @@ fn install_windows(binary_path: &std::path::Path) -> Result<PathBuf> {
 
     // Create a Task Scheduler task that runs at logon and restarts on failure
     let output = Command::new("schtasks")
-        .args([
-            "/Create",
-            "/TN",
-            TASK_NAME,
-            "/TR",
-            &format!("\"{}\" daemon", bin),
-            "/SC",
-            "ONLOGON",
-            "/RL",
-            "LIMITED",
-            "/F",
-        ])
+        .args(windows_task_create_args(&bin))
         .output()
         .map_err(BooError::Io)?;
 
@@ -427,6 +440,21 @@ fn generate_app_bundle(binary_path: &std::path::Path, app_dir: &std::path::Path)
     Ok(())
 }
 
+/// Swift source for the boo:// URL handler. The binary path is escaped for a
+/// Swift double-quoted string literal so an unusual install path can't break
+/// out of the generated source.
+#[cfg(target_os = "macos")]
+fn url_handler_swift_source(boo_binary: &std::path::Path) -> String {
+    let escaped = boo_binary
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    format!(
+        r#"import Cocoa
+class D:NSObject,NSApplicationDelegate{{func application(_ a:NSApplication,open urls:[URL]){{for u in urls{{let t=Process();t.executableURL=URL(fileURLWithPath:"{escaped}");t.arguments=[u.absoluteString];try? t.run()}};NSApp.terminate(nil)}}}};let a=NSApplication.shared;a.delegate=D();a.run()"#
+    )
+}
+
 #[cfg(target_os = "macos")]
 fn generate_url_handler(boo_binary: &std::path::Path, app_dir: &std::path::Path) -> Result<()> {
     let contents = app_dir.join("Contents");
@@ -434,11 +462,7 @@ fn generate_url_handler(boo_binary: &std::path::Path, app_dir: &std::path::Path)
     std::fs::create_dir_all(&macos_dir)?;
 
     // Compile the Swift URL handler
-    let swift_src = format!(
-        r#"import Cocoa
-class D:NSObject,NSApplicationDelegate{{func application(_ a:NSApplication,open urls:[URL]){{for u in urls{{let t=Process();t.executableURL=URL(fileURLWithPath:"{}");t.arguments=[u.absoluteString];try? t.run()}};NSApp.terminate(nil)}}}};let a=NSApplication.shared;a.delegate=D();a.run()"#,
-        boo_binary.to_string_lossy()
-    );
+    let swift_src = url_handler_swift_source(boo_binary);
 
     let src_path = std::env::temp_dir().join("boo-url-handler.swift");
     std::fs::write(&src_path, &swift_src)?;
@@ -588,5 +612,60 @@ mod tests {
         assert!(result.contains("/usr/local/bin/boo daemon"));
         assert!(result.contains("Restart=always"));
         assert!(result.contains("WantedBy=default.target"));
+    }
+
+    #[test]
+    fn test_get_boo_binary_path_resolves() {
+        // Resolves to some executable path (the test binary here).
+        let p = get_boo_binary_path().expect("current exe should resolve");
+        assert!(p.is_absolute());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_linux_desktop_entry() {
+        let entry = linux_desktop_entry(&PathBuf::from("/usr/local/bin/boo"));
+        assert!(entry.contains("[Desktop Entry]"));
+        assert!(entry.contains("Exec=/usr/local/bin/boo %u"));
+        assert!(entry.contains("x-scheme-handler/boo"));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_windows_task_create_args() {
+        let args = windows_task_create_args("C:\\bin\\boo.exe");
+        assert!(args.iter().any(|a| a == TASK_NAME));
+        assert!(args.iter().any(|a| a == "ONLOGON"));
+        assert!(args
+            .iter()
+            .any(|a| a.contains("boo.exe") && a.contains("daemon")));
+        // /F makes the create idempotent (overwrite existing task)
+        assert!(args.iter().any(|a| a == "/F"));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_url_handler_swift_source_escapes_path() {
+        // Normal path appears verbatim.
+        let src = url_handler_swift_source(&PathBuf::from(
+            "/Users/me/Applications/Boo.app/Contents/MacOS/boo",
+        ));
+        assert!(
+            src.contains("fileURLWithPath:\"/Users/me/Applications/Boo.app/Contents/MacOS/boo\"")
+        );
+        // A path containing a quote is escaped, so it can't break out of the
+        // Swift string literal.
+        let tricky = url_handler_swift_source(&PathBuf::from("/tmp/ev\"il/boo"));
+        assert!(tricky.contains("ev\\\"il"));
+        assert!(!tricky.contains("ev\"il"));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_generate_plist_daemon_and_keepalive() {
+        let plist = generate_plist(&PathBuf::from("/x/boo"), &PathBuf::from("/home/.boo"));
+        assert!(plist.contains("<string>daemon</string>"));
+        assert!(plist.contains("KeepAlive"));
+        assert!(plist.contains("RunAtLoad"));
     }
 }
