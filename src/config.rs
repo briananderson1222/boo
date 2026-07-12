@@ -4,9 +4,18 @@ use std::path::PathBuf;
 /// Global configuration stored at ~/.boo/config.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Path to kiro-cli binary (auto-detected on install)
+    /// Path to the kiro-cli binary (auto-detected on install). Used by the
+    /// `kiro` runner.
     #[serde(default = "default_kiro_path")]
     pub kiro_cli_path: String,
+
+    /// Path to the Claude Code CLI binary. Used by the `claude` runner.
+    #[serde(default = "default_claude_path")]
+    pub claude_cli_path: String,
+
+    /// Path to the Codex CLI binary. Used by the `codex` runner.
+    #[serde(default = "default_codex_path")]
+    pub codex_cli_path: String,
 
     /// Default job timeout in seconds
     #[serde(default = "default_timeout")]
@@ -32,6 +41,12 @@ pub struct Config {
 fn default_kiro_path() -> String {
     "kiro-cli".to_string()
 }
+fn default_claude_path() -> String {
+    "claude".to_string()
+}
+fn default_codex_path() -> String {
+    "codex".to_string()
+}
 fn default_timeout() -> u64 {
     300
 }
@@ -46,6 +61,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             kiro_cli_path: default_kiro_path(),
+            claude_cli_path: default_claude_path(),
+            codex_cli_path: default_codex_path(),
             default_timeout_secs: default_timeout(),
             max_log_runs: default_max_log_runs(),
             heartbeat_secs: default_heartbeat_secs(),
@@ -153,10 +170,23 @@ mod tests {
             heartbeat_secs: 30,
             terminal: None,
             notify_webhook: None,
+            ..Config::default()
         };
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.kiro_cli_path, config.kiro_cli_path);
         assert_eq!(loaded.default_timeout_secs, config.default_timeout_secs);
+        assert_eq!(loaded.claude_cli_path, config.claude_cli_path);
+        assert_eq!(loaded.codex_cli_path, config.codex_cli_path);
+    }
+
+    #[test]
+    fn test_old_config_without_new_paths_still_loads() {
+        // A config.json written before the multi-runner fields existed must
+        // still deserialize, filling the new paths with defaults.
+        let json = r#"{"kiro_cli_path":"kiro-cli","default_timeout_secs":300,"max_log_runs":50,"heartbeat_secs":60}"#;
+        let loaded: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(loaded.claude_cli_path, "claude");
+        assert_eq!(loaded.codex_cli_path, "codex");
     }
 }
