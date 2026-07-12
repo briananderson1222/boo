@@ -41,12 +41,12 @@ jobs:
 
           COMMENT_CREATED="${{ github.event.comment.created_at }}"
           REVIEW_BODY=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq "[.[] | select(.body | contains(\"REVIEW_DATA\")) | select(.submitted_at < \"$COMMENT_CREATED\")] | last | .body" \
+            --jq "[.[] | select(.body | contains(\"REVIEW_DATA\")) | select(.submitted_at < \"$COMMENT_CREATED\")] | last | .body // empty" \
             || true)
 
           if [ -z "$REVIEW_BODY" ]; then
             REVIEW_BODY=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
-              --jq '[.[] | select(.body | contains("REVIEW_DATA"))] | last | .body' \
+              --jq '[.[] | select(.body | contains("REVIEW_DATA"))] | last | .body // empty' \
               || true)
           fi
 
@@ -75,10 +75,21 @@ jobs:
             exit 0
           fi
 
+          LABEL="code-review"
+          if ! gh label create "$LABEL" --repo "$REPO" --color "ededed" \
+            --description "Opened from a Kiro review finding" --force >/dev/null 2>&1; then
+            echo "Could not create/update label '$LABEL'; will create the issue without it if it is missing." >&2
+          fi
+
+          LABEL_ARGS=()
+          if gh api "repos/$REPO/labels/$LABEL" >/dev/null 2>&1; then
+            LABEL_ARGS=(--label "$LABEL")
+          fi
+
           ISSUE_URL=$(gh issue create --repo "$REPO" \
             --title "$TITLE" \
             --body-file issue-body.md \
-            --label "code-review")
+            "${LABEL_ARGS[@]}")
 
           ISSUE_NUM="${ISSUE_URL##*/}"
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Created issue #$ISSUE_NUM for finding #$FINDING_NUM."
