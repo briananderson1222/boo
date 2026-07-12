@@ -142,18 +142,6 @@ impl<C: Clock + 'static> Scheduler<C> {
                 running_jobs.lock().await.insert(job.id);
             }
 
-            // Track active run on disk for boo status/wait
-            if let Ok(store) = Self::make_store(&store_dir) {
-                let active = crate::store::ActiveRun {
-                    job_id: job.id,
-                    job_name: job.name.clone(),
-                    pid: std::process::id(),
-                    started_at: chrono::Utc::now(),
-                    manual: false,
-                };
-                let _ = store.write_active_run(&active);
-            }
-
             let result = Self::execute_with_retry(
                 job.clone(),
                 config,
@@ -311,7 +299,46 @@ impl<C: Clock + 'static> Scheduler<C> {
         let ms = now.timestamp_subsec_millis();
         let log_path = log_dir.join(format!("{ts}_{ms:03}.log"));
 
-        let result = executor::execute_job(job, config, &log_path).await?;
+        // Track the real child PID on disk for boo status/wait/kill
+        let active_store = Self::make_store(store_dir)?;
+        let (active_id, active_name) = (job.id, job.name.clone());
+        let on_spawn = move |pid: u32| {
+            let _ = active_store.write_active_run(&crate::store::ActiveRun {
+                job_id: active_id,
+                job_name: active_name.clone(),
+                pid,
+                started_at: chrono::Utc::now(),
+                manual: false,
+            });
+        };
+
+        let started = std::time::Instant::now();
+        let exec = executor::execute_job(job, config, &log_path, Some(&on_spawn)).await;
+
+        let result = match exec {
+            Ok(result) => result,
+            Err(e) => {
+                // Timeouts and spawn failures must still leave a run record
+                // and advance last_run — otherwise the job stays overdue and
+                // refires every heartbeat forever, invisibly.
+                let record = RunRecord {
+                    job_id: job.id,
+                    job_name: job.name.clone(),
+                    fired_at: now,
+                    scheduled_for,
+                    missed_count: missed,
+                    duration_secs: started.elapsed().as_secs_f64(),
+                    exit_code: None,
+                    success: false,
+                    output_path: log_path.clone(),
+                    manual: false,
+                };
+                let _ = store.append_run_record(&record);
+                let _ = store.rotate_logs(job.id, config.max_log_runs);
+                let _ = store.set_last_run(job.id, now);
+                return Err(e);
+            }
+        };
 
         let record = RunRecord {
             job_id: job.id,
@@ -328,9 +355,7 @@ impl<C: Clock + 'static> Scheduler<C> {
         store.append_run_record(&record)?;
         store.rotate_logs(job.id, config.max_log_runs)?;
 
-        let mut updated = job.clone();
-        updated.last_run = Some(now);
-        store.update_job(&updated)?;
+        store.set_last_run(job.id, now)?;
 
         notifier::send_notification(job, &result, sender);
 
@@ -551,6 +576,117 @@ mod tests {
             store.get_job(job_id).is_err(),
             "Job should be deleted after run"
         );
+    }
+
+    /// A3: a timed-out job must still leave a run record and advance
+    /// last_run, otherwise it refires every heartbeat forever.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_timeout_records_run_and_advances_last_run() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().to_path_buf();
+        let now = Utc::now();
+
+        let mut job = Job::new("timeout-test", "* * * * *", "", std::env::temp_dir());
+        job.command = Some("sleep 30".into());
+        job.timeout_secs = Some(1);
+        job.last_run = Some(now - chrono::Duration::minutes(2));
+        JobStore::with_dir(dir.clone())
+            .unwrap()
+            .add_job(job.clone())
+            .unwrap();
+
+        let scheduler = Scheduler::new(MockClock::new(now), test_config(), Some(dir.clone()));
+        scheduler.tick().await;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        let store = JobStore::with_dir(dir).unwrap();
+        let records = store.load_run_records(job.id, 10).unwrap();
+        assert!(!records.is_empty(), "timeout must produce a run record");
+        assert!(!records[0].success, "timeout record must be a failure");
+        let reloaded = store.get_job(job.id).unwrap();
+        assert!(
+            reloaded.last_run.is_some() && reloaded.last_run.unwrap() >= now,
+            "last_run must advance after a timeout so the job doesn't refire forever"
+        );
+    }
+
+    /// A2: edits made while a run is in flight must survive run completion.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_concurrent_edit_survives_run_completion() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().to_path_buf();
+        let now = Utc::now();
+
+        let mut job = Job::new("edit-race-test", "* * * * *", "", std::env::temp_dir());
+        job.command = Some("sleep 1".into());
+        job.timeout_secs = Some(10);
+        job.last_run = Some(now - chrono::Duration::minutes(2));
+        JobStore::with_dir(dir.clone())
+            .unwrap()
+            .add_job(job.clone())
+            .unwrap();
+
+        let scheduler = Scheduler::new(MockClock::new(now), test_config(), Some(dir.clone()));
+        scheduler.tick().await;
+        // Edit while the job is running
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let store = JobStore::with_dir(dir.clone()).unwrap();
+        let mut edited = store.get_job(job.id).unwrap();
+        edited.enabled = false;
+        edited.description = Some("edited mid-run".into());
+        store.update_job(&edited).unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        let reloaded = store.get_job(job.id).unwrap();
+        assert!(!reloaded.enabled, "disable during run must not be reverted");
+        assert_eq!(
+            reloaded.description.as_deref(),
+            Some("edited mid-run"),
+            "edits during run must not be reverted"
+        );
+        assert!(reloaded.last_run.is_some(), "last_run must still be set");
+    }
+
+    /// A1: the active-run record must carry the child's PID, not the
+    /// daemon's, so boo kill/wait signal the right process.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_active_run_records_child_pid() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().to_path_buf();
+        let now = Utc::now();
+
+        let mut job = Job::new("pid-test", "* * * * *", "", std::env::temp_dir());
+        job.command = Some("sleep 2".into());
+        job.timeout_secs = Some(10);
+        job.last_run = Some(now - chrono::Duration::minutes(2));
+        JobStore::with_dir(dir.clone())
+            .unwrap()
+            .add_job(job.clone())
+            .unwrap();
+
+        let scheduler = Scheduler::new(MockClock::new(now), test_config(), Some(dir.clone()));
+        scheduler.tick().await;
+
+        let store = JobStore::with_dir(dir).unwrap();
+        let mut active = None;
+        for _ in 0..20 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if let Some(run) = store.get_active_run(job.id) {
+                active = Some(run);
+                break;
+            }
+        }
+        let active = active.expect("active run should be recorded while job runs");
+        assert_ne!(
+            active.pid,
+            std::process::id(),
+            "active run must record the child PID, not this process"
+        );
+        assert!(active.pid != 0, "active run must record a real PID");
     }
 
     #[tokio::test]

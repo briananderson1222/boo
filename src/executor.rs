@@ -97,7 +97,17 @@ pub fn get_runner(job: &Job) -> Box<dyn Runner> {
 }
 
 /// Execute a job, capturing output to log file.
-pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<ExecutionResult> {
+///
+/// `on_spawn` is invoked with the child's PID immediately after spawn so
+/// callers can record the real process to signal for `boo kill`/`boo wait`
+/// (recording the daemon's own PID here was a bug: the child lives in its
+/// own process group).
+pub async fn execute_job(
+    job: &Job,
+    config: &Config,
+    log_path: &Path,
+    on_spawn: Option<&(dyn Fn(u32) + Send + Sync)>,
+) -> Result<ExecutionResult> {
     // Ensure working dir and log dir exist
     tokio::fs::create_dir_all(&job.working_dir)
         .await
@@ -127,16 +137,23 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
 
     let mut child = cmd.spawn().map_err(BooError::Io)?;
 
-    if let Some(bytes) = runner.stdin_bytes(job) {
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(&bytes).await;
-            drop(stdin);
-        }
-    } else {
-        drop(child.stdin.take());
+    if let (Some(callback), Some(pid)) = (on_spawn, child.id()) {
+        callback(pid);
     }
 
     let result = tokio::time::timeout(Duration::from_secs(timeout_secs), async {
+        // Stdin write must happen inside the timeout: a child that never
+        // reads stdin would otherwise block this task forever once the
+        // prompt exceeds the pipe buffer.
+        if let Some(bytes) = runner.stdin_bytes(job) {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(&bytes).await;
+                drop(stdin);
+            }
+        } else {
+            drop(child.stdin.take());
+        }
+
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
@@ -199,6 +216,12 @@ pub async fn execute_job(job: &Job, config: &Config, log_path: &Path) -> Result<
                 }
             }
             let _ = child.kill().await;
+            // Leave a log behind so the failure is visible in `boo logs`
+            let _ = tokio::fs::write(
+                log_path,
+                format!("boo: job timed out after {timeout_secs}s; process killed\n"),
+            )
+            .await;
             Err(BooError::JobTimeout(timeout_secs))
         }
     }
@@ -274,7 +297,7 @@ mod tests {
         let job = test_job();
         let dir = tempdir().unwrap();
         let log_path = dir.path().join("test.log");
-        let result = execute_job(&job, &test_config(), &log_path).await;
+        let result = execute_job(&job, &test_config(), &log_path, None).await;
         assert!(result.is_ok());
         let r = result.unwrap();
         assert!(r.response.is_some());
@@ -285,7 +308,9 @@ mod tests {
         let job = test_job();
         let dir = tempdir().unwrap();
         let log_path = dir.path().join("test.log");
-        let result = execute_job(&job, &test_config(), &log_path).await.unwrap();
+        let result = execute_job(&job, &test_config(), &log_path, None)
+            .await
+            .unwrap();
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert!(content.contains("chat"));
         assert!(result.success);

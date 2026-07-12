@@ -112,6 +112,20 @@ impl JobStore {
         })
     }
 
+    /// Atomically set only last_run, preserving any concurrent edits to the
+    /// job (schedule, enabled, prompt...) made while a run was in flight.
+    /// No-op if the job was deleted mid-run.
+    pub fn set_last_run(&self, id: Uuid, t: DateTime<Utc>) -> Result<()> {
+        self.with_lock(|| {
+            let mut jobs = self.read_jobs_unlocked()?;
+            if let Some(job) = jobs.iter_mut().find(|j| j.id == id) {
+                job.last_run = Some(t);
+                self.write_jobs_unlocked(&jobs)?;
+            }
+            Ok(())
+        })
+    }
+
     pub fn get_job(&self, id: Uuid) -> Result<Job> {
         self.with_lock(|| {
             let jobs = self.read_jobs_unlocked()?;

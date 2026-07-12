@@ -664,17 +664,22 @@ async fn cmd_run(
         now.timestamp_subsec_millis()
     ));
 
-    // Track active run
-    let active = boo::store::ActiveRun {
-        job_id: job.id,
-        job_name: job.name.clone(),
-        pid: process::id(),
-        started_at: now,
-        manual: true,
+    // Track active run with the real child PID (so kill/wait target the job,
+    // not this CLI process)
+    let (active_id, active_name) = (job.id, job.name.clone());
+    let on_spawn = move |pid: u32| {
+        if let Ok(s) = JobStore::new() {
+            let _ = s.write_active_run(&boo::store::ActiveRun {
+                job_id: active_id,
+                job_name: active_name.clone(),
+                pid,
+                started_at: now,
+                manual: true,
+            });
+        }
     };
-    let _ = store.write_active_run(&active);
 
-    match executor::execute_job(&job, &config, &log_path).await {
+    match executor::execute_job(&job, &config, &log_path, Some(&on_spawn)).await {
         Ok(result) => {
             store.remove_active_run(job.id);
             let record = boo::job::RunRecord {
@@ -729,6 +734,20 @@ async fn cmd_run(
         }
         Err(e) => {
             store.remove_active_run(job.id);
+            // Failed manual runs should be visible in boo logs/stats too
+            let record = boo::job::RunRecord {
+                job_id: job.id,
+                job_name: job.name.clone(),
+                fired_at: now,
+                scheduled_for: now,
+                missed_count: 0,
+                duration_secs: (Utc::now() - now).num_milliseconds() as f64 / 1000.0,
+                exit_code: None,
+                success: false,
+                output_path: log_path.clone(),
+                manual: true,
+            };
+            let _ = store.append_run_record(&record);
             if !no_notify {
                 notifier::notify_error(&job, &e.to_string());
             }
