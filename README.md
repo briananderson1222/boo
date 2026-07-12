@@ -81,6 +81,7 @@ Cron uses standard 5-field syntax and evaluates in UTC unless you pass `--timezo
 | `codex` | `codex exec` | `--trust-all-tools` bypasses the sandbox, else `--sandbox workspace-write`; `--agent`/`--trust-tools` ignored |
 | `pi` | `pi -p` ([pi](https://github.com/earendil-works/pi)) | `--trust-tools` → `--tools` (allowlist); `--agent` ignored |
 | `opencode` | `opencode run` ([opencode](https://opencode.ai)) | `--model` uses `provider/model`; `--agent` → `--agent`; `--trust-all-tools` → `--auto`; prompt passed as an argument |
+| `acp` | any [ACP](https://agentclientprotocol.com) agent | Generic — drives any Agent Client Protocol agent (opencode, kiro, …) over JSON-RPC. Set `acp_command` in config |
 | `shell` | `sh -c` / `cmd /C` | Runs `--command` as a raw shell command — no AI needed |
 
 ```bash
@@ -93,6 +94,15 @@ boo add --name codex-audit --runner codex --cron "0 7 * * 1" \
 boo add --name backup --runner shell --every 1d \
   --command "rsync -a ~/docs /backup/"
 ```
+
+The `acp` runner is generic: instead of a per-CLI adapter it speaks the [Agent Client Protocol](https://agentclientprotocol.com) (JSON-RPC over stdio) to **any** ACP agent — point `acp_command` at one and it works:
+
+```bash
+# ~/.boo/config.json → { "acp_command": "opencode acp" }   (or "kiro-cli acp")
+boo add --name acp-brief --runner acp --every 1d --prompt "Summarize open PRs"
+```
+
+By default the ACP runner denies tool-permission requests (safe for unattended runs); `--trust-all-tools` approves them and `--trust-tools` approves matching tool names.
 
 Binary paths are configurable (`kiro_cli_path` / `claude_cli_path` / `codex_cli_path` / `pi_cli_path` / `opencode_cli_path`); they default to the CLI name on `PATH`. Foreground interactive runs (`boo run --interactive`), session resume (`boo resume`), and natural-language `--at` parsing work for every runner — mapped to each CLI's own resume flags (kiro `--resume`, claude `--continue`, codex `resume --last`). Only `--new-window` and `boo://resume` deep links remain kiro-specific for now.
 
@@ -145,7 +155,7 @@ Binary paths are configurable (`kiro_cli_path` / `claude_cli_path` / `codex_cli_
 | `--cron` / `--at` / `--every` | Schedule (exactly one) | required |
 | `--prompt` | Prompt piped to the runner via stdin | required (unless `--command`) |
 | `--command` | Raw shell command (implies `--runner shell`) | — |
-| `--runner` | `kiro` (default), `claude`, `codex`, `pi`, `opencode`, `shell` | `kiro` |
+| `--runner` | `kiro` (default), `claude`, `codex`, `pi`, `opencode`, `acp`, `shell` | `kiro` |
 | `--dir` | Working directory for the job | `~/.boo/workspace/<name>` |
 | `--agent` | Agent to use (kiro runner only) | default agent |
 | `--model` | Model override, passed to the runner's CLI | runner default |
@@ -184,6 +194,7 @@ Optional `~/.boo/config.json`:
 | Key | Description | Default |
 |-----|-------------|---------|
 | `kiro_cli_path` / `claude_cli_path` / `codex_cli_path` / `pi_cli_path` / `opencode_cli_path` | Binary for each runner | CLI name on `PATH` |
+| `acp_command` | Launch command for the `acp` runner (e.g. `"opencode acp"`, `"kiro-cli acp"`) | — |
 | `default_timeout_secs` | Default job timeout | 300 |
 | `max_log_runs` | Log files kept per job | 50 |
 | `heartbeat_secs` | Daemon tick interval | 60 |

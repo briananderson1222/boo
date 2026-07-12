@@ -25,6 +25,11 @@ pub struct Config {
     #[serde(default = "default_opencode_path")]
     pub opencode_cli_path: String,
 
+    /// Launch command for the generic `acp` runner — an Agent Client Protocol
+    /// agent, space-separated (e.g. "opencode acp" or "kiro-cli acp").
+    #[serde(default)]
+    pub acp_command: Option<String>,
+
     /// Default job timeout in seconds
     #[serde(default = "default_timeout")]
     pub default_timeout_secs: u64,
@@ -79,6 +84,7 @@ impl Default for Config {
             codex_cli_path: default_codex_path(),
             pi_cli_path: default_pi_path(),
             opencode_cli_path: default_opencode_path(),
+            acp_command: None,
             default_timeout_secs: default_timeout(),
             max_log_runs: default_max_log_runs(),
             heartbeat_secs: default_heartbeat_secs(),

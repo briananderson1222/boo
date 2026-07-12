@@ -594,6 +594,14 @@ async fn cmd_run(
         job.trust_tools = Some(tools.clone());
     }
 
+    // The ACP runner speaks a protocol, not an interactive TUI.
+    if interactive && job.runner.as_deref() == Some("acp") {
+        return Err(boo::error::BooError::Other(format!(
+            "the acp runner has no interactive mode; run it non-interactively with `boo run {}`.",
+            job.name
+        )));
+    }
+
     // The new-terminal-window launcher builds a kiro-cli command, so it's the
     // one interactive path that's still kiro-only. Foreground interactive works
     // for every runner (see interactive_command).

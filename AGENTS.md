@@ -20,6 +20,7 @@ src/
 ├── scheduler.rs      # Heartbeat loop, job spawning, retry loop, delete-after-run, notification integration
 ├── store.rs          # Atomic JSON persistence with file locking (single lock scope per mutation)
 ├── executor.rs       # Runner trait (Kiro/ClaudeCode/Codex/Pi/Opencode/Shell runners), subprocess spawning, stdin piping, timeout + kill
+├── acp.rs            # Generic Agent Client Protocol runner (JSON-RPC/stdio) for any ACP agent
 ├── cron_eval.rs      # Schedule evaluation (cron/at/every), overdue detection, missed count
 ├── job.rs            # Job + RunRecord models with schedule types, runner/command, retry/notification fields
 ├── config.rs         # Global config (~/.boo/config.json), warns on malformed config

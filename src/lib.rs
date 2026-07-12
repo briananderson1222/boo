@@ -1,3 +1,4 @@
+pub mod acp;
 pub mod clock;
 pub mod config;
 pub mod cron_eval;
@@ -115,6 +116,7 @@ pub mod test_helpers {
             codex_cli_path: "echo".to_string(),
             pi_cli_path: "echo".to_string(),
             opencode_cli_path: "echo".to_string(),
+            acp_command: None,
             default_timeout_secs: 5,
             max_log_runs: 10,
             heartbeat_secs: 60,
