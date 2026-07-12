@@ -1,289 +1,170 @@
 # Boo
 
-Cross-platform scheduler daemon that fires [kiro-cli](https://kiro.dev/cli/) prompts on cron schedules. Think of it as a personal cron for AI tasks — schedule prompts that run automatically, survive sleep/wake cycles, and catch up on missed runs.
+**A personal cron for AI agents.** Schedule prompts for [kiro-cli](https://kiro.dev/cli/), [Claude Code](https://docs.claude.com/en/docs/claude-code), or [Codex](https://developers.openai.com/codex/cli) — plus plain shell commands — and Boo runs them on time, survives sleep/wake and reboots, and catches up on anything it missed.
 
 Inspired by [OpenClaw's heartbeat technique](https://zenvanriel.nl/ai-engineer-blog/openclaw-cron-jobs-proactive-ai-guide/) for proactive AI automation.
+
+## Why Boo?
+
+- **Set-and-forget AI tasks.** "Every weekday at 9am, summarize my calendar." "Every 30 minutes, flag urgent emails." Boo fires the prompt and captures the response.
+- **Never misses.** Job state is on disk. Close your laptop, reboot, come back tomorrow — the next tick detects overdue jobs and runs them, recording how many occurrences were skipped.
+- **Not locked to one tool.** The same job model drives kiro-cli, Claude Code, Codex, or a raw shell command — pick per job with `--runner`.
+- **Native desktop notifications.** Click to open the result; reply inline to start a follow-up session.
+- **One small binary.** Cross-platform Rust (~3.5 MB), no runtime dependencies, CLI-first.
 
 ## Install
 
 ```bash
 cargo build --release
 cp target/release/boo /usr/local/bin/
+boo install          # optional: run as an auto-start service
 ```
 
-> **Note:** After building a new version, re-run `boo install` to update the `.app` bundles used for notifications and URL scheme handling.
+> After building a new version, re-run `boo install` to refresh the notification / URL-handler app bundles.
 
-## Quick Start
+## Quick start
 
 ```bash
-# Recurring job with cron
-boo add --name "morning-brief" \
+# Recurring (cron): weekday mornings
+boo add --name morning-brief \
   --cron "0 9 * * 1-5" \
-  --prompt "Check my calendar and summarize today's meetings" \
-  --agent sales-sa --timeout 180
+  --prompt "Check my calendar and summarize today's meetings"
 
-# One-shot reminder
-boo add --name "remind-prep" \
-  --at "2026-02-20T15:00:00Z" \
-  --prompt "Review the Quick Suite email before your meeting" \
+# One-shot reminder that deletes itself after running
+boo add --name remind-prep \
+  --at "tomorrow 3pm" \
+  --prompt "Review the Quick Suite email before the meeting" \
   --delete-after-run
 
-# Interval job
-boo add --name "inbox-check" \
-  --every "30m" \
-  --prompt "Flag any urgent emails"
+# Interval
+boo add --name inbox-check --every 30m --prompt "Flag any urgent emails"
 
-# Test it
-boo run morning-brief
-
-# Start the daemon
-boo daemon
-
-# Or install as auto-start service
-boo install
+boo run morning-brief    # test it now
+boo daemon               # run the scheduler in the foreground (or `boo install`)
 ```
 
-## Schedule Types
+## Scheduling
 
-Three mutually exclusive schedule types:
+Every job has exactly one schedule type:
 
-| Type | Flag | Example | Use Case |
-|------|------|---------|----------|
+| Type | Flag | Example | Use for |
+|------|------|---------|---------|
 | Cron | `--cron` | `"0 9 * * 1-5"` | Recurring at specific times |
-| At | `--at` | `"2026-02-20T15:00:00Z"` or `"tomorrow 9am"` | One-shot, fire once |
-| Every | `--every` | `"30m"`, `"6h"`, `"1d"` | Recurring at fixed intervals |
+| At | `--at` | `"2026-02-20T15:00:00Z"` or `"tomorrow 9am"` | Fire once |
+| Every | `--every` | `"30m"`, `"6h"`, `"1d"` | Recurring at a fixed interval |
 
-Natural language `--at` values (like "tomorrow 9am") are parsed via kiro-cli with confirmation.
+Cron uses standard 5-field syntax and evaluates in UTC unless you pass `--timezone` (e.g. `America/New_York`, DST-aware). Natural-language `--at` values are parsed via kiro-cli with confirmation. Preview any expression with `boo next "<cron>"`.
 
-## Using Kiro Agents
+<details>
+<summary>Cron examples</summary>
 
-Jobs can target specific kiro-cli agents with `--agent` and models with `--model`:
-
-```bash
-boo add --name "calendar-check" \
-  --cron "0 8 * * 1-5" \
-  --prompt "Check my calendar for today" \
-  --agent sales-sa \
-  --model claude-sonnet-4.5 \
-  --timeout 180
 ```
+* * * * *        Every minute
+0 9 * * *        Daily at 9:00 AM
+0 9 * * 1-5      Weekdays at 9:00 AM
+*/30 * * * *     Every 30 minutes
+0 8,17 * * *     At 8:00 AM and 5:00 PM
+0 0 1 * *        First of each month at midnight
+```
+</details>
 
-## Runners (agent harnesses)
+## Runners: kiro, Claude Code, Codex, or shell
 
-Boo isn't tied to a single CLI. `--runner` selects which harness executes a
-job's prompt (non-interactively, with the prompt piped to the CLI's stdin):
+`--runner` picks which tool executes the job. The prompt is piped to the tool's stdin; Boo maps its generic options (`--model`, `--trust-all-tools`, `--trust-tools`) onto each CLI's flags.
 
 | Runner | CLI | Notes |
 |--------|-----|-------|
-| `kiro` (default) | `kiro-cli chat --no-interactive` | Full support: `--agent`, `--model`, `--trust-all-tools`, `--trust-tools`, plus interactive resume. |
-| `claude` | `claude -p` (Claude Code headless) | `--model` → `--model`; `--trust-all-tools` → `--dangerously-skip-permissions`; `--trust-tools` → `--allowedTools`. `--agent` is ignored (Claude Code agents are file-based). |
-| `codex` | `codex exec` | `--model` → `-m`; `--trust-all-tools` → bypass sandbox, otherwise `--sandbox workspace-write`. `--agent`/`--trust-tools` are ignored. |
-| `shell` | `sh -c` / `cmd /C` | Runs `--command` (or `--prompt`) as a raw shell command. |
+| `kiro` *(default)* | `kiro-cli chat` | Full support incl. `--agent` and interactive resume |
+| `claude` | `claude -p` (Claude Code headless) | `--trust-all-tools` → `--dangerously-skip-permissions`; `--trust-tools` → `--allowedTools`; `--agent` ignored |
+| `codex` | `codex exec` | `--trust-all-tools` bypasses the sandbox, else `--sandbox workspace-write`; `--agent`/`--trust-tools` ignored |
+| `shell` | `sh -c` / `cmd /C` | Runs `--command` as a raw shell command — no AI needed |
 
 ```bash
-boo add --name "codex-audit" --runner codex \
-  --cron "0 7 * * 1" --prompt "Audit deps for CVEs" --model gpt-5-codex
+boo add --name claude-brief --runner claude --every 1d \
+  --prompt "Summarize yesterday's commits"
 
-boo add --name "claude-brief" --runner claude \
-  --every 1d --prompt "Summarize yesterday's commits"
+boo add --name codex-audit --runner codex --cron "0 7 * * 1" \
+  --prompt "Audit dependencies for CVEs" --model gpt-5-codex
+
+boo add --name backup --runner shell --every 1d \
+  --command "rsync -a ~/docs /backup/"
 ```
 
-Each runner's binary path is configurable in `~/.boo/config.json`
-(`kiro_cli_path`, `claude_cli_path`, `codex_cli_path`); they default to
-`kiro-cli`, `claude`, and `codex` on `PATH`.
+Binary paths are configurable (`kiro_cli_path` / `claude_cli_path` / `codex_cli_path`); they default to the CLI name on `PATH`. Interactive resume and natural-language `--at` currently work with the `kiro` runner only — requesting an interactive run for a `claude`/`codex` job errors clearly rather than silently using kiro-cli.
 
-> **Note:** interactive/resume (`boo run --interactive`, `boo://resume`) and
-> natural-language `--at` parsing currently work with the `kiro` runner only;
-> requesting an interactive run for a `claude`/`codex` job errors clearly
-> rather than falling back to kiro-cli.
+## Features you'll use
 
-## Commands
+- **Missed-run catch-up.** After sleep or downtime, an overdue job fires once and reports `missed_count` (skipped occurrences); on-time runs report 0.
+- **Retry.** `--retry N --retry-delay S` retries failed runs; every attempt is logged and notifications show progress.
+- **Notifications.** Completion notifications preview the response and open the artifact on click; a "Reply" action opens a follow-up session in your terminal. Opt into start notifications with `--notify-start`.
+- **Clickable artifacts.** `--open-artifact "daily-*.html"` opens the newest matching file when the notification is clicked — handy for agents that write timestamped output.
+- **Session resume.** Every kiro run leaves a session you can pick up:
+  ```bash
+  boo resume morning-brief                  # latest session
+  boo resume morning-brief "follow up"      # with a prompt
+  boo resume morning-brief --previous       # choose from history
+  ```
+- **Deep links.** With the URL handler installed, `boo://run/<job>` and `boo://resume/<job>?prompt=…` trigger jobs from bookmarks or HTML. Because any page can open a link, these are **opt-in per job** via `--allow-url-trigger true`; `boo://open/<job>` (opens an artifact only) is not gated.
+
+## Command reference
+
+<details>
+<summary>All commands</summary>
 
 | Command | Description |
 |---------|-------------|
 | `boo daemon` | Start the scheduler (foreground) |
 | `boo add` | Add a scheduled job |
-| `boo remove <name\|id>` | Remove a job |
-| `boo list` | List all jobs (supports `--format json\|csv\|table`) |
+| `boo edit <name\|id>` | Change an existing job's settings |
+| `boo remove <name\|id>` | Remove a job (`--delete-logs` / `--keep-logs`) |
+| `boo list` | List all jobs (`--format table\|json\|csv`) |
 | `boo enable/disable <name\|id>` | Toggle a job |
-| `boo status` | Show daemon status and upcoming fires |
-| `boo run <name\|id>` | Fire a job immediately (with notifications, use `--no-notify` to suppress) |
-| `boo run --follow` | Print only response content for programmatic use |
-| `boo run --interactive` | Launch foreground kiro-cli session for a job |
-| `boo run --interactive --new-window` | Open a new terminal window for the session |
-| `boo next "<cron>"` | Preview next N occurrences of a cron expression |
-| `boo logs <name\|id>` | Show run history |
-| `boo logs <name\|id> --output` | Print the clean response from the most recent run |
-| `boo resume [name\|id]` | Resume an interactive kiro-cli session to follow up |
-| `boo stats [name\|id]` | Show run statistics (24h/7d/30d windows, supports `--format json\|csv\|table`) |
-| `boo edit <name\|id>` | Edit an existing job's settings |
-| `boo wait <name\|id>` | Wait for an active job run to complete |
-| `boo running` | Show only currently active runs with PID, elapsed time, source |
-| `boo kill <name\|id>` | Terminate an active run (kills process group) |
-| `boo clean` | Remove completed one-shot jobs (`--dry-run` to preview, `--keep-logs` to retain logs) |
-| `boo install` | Register as auto-start service (re-run after building new version) |
-| `boo uninstall` | Remove auto-start service |
+| `boo status` | Daemon status and upcoming fires |
+| `boo run <name\|id>` | Fire a job now (`--no-notify`, `--follow`, `--interactive`, `--new-window`) |
+| `boo next "<cron>"` | Preview upcoming occurrences of a cron expression |
+| `boo logs <name\|id>` | Run history (`--output` prints the latest clean response) |
+| `boo resume [name\|id]` | Resume an interactive kiro-cli session |
+| `boo stats [name\|id]` | Run statistics (24h/7d/30d, `--format`) |
+| `boo running` | Currently active runs (PID, elapsed, source) |
+| `boo wait <name\|id>` | Block until an active run finishes |
+| `boo kill <name\|id>` | Terminate an active run (kills the process group) |
+| `boo clean` | Remove completed one-shot jobs (`--dry-run`, `--keep-logs`) |
+| `boo install` / `boo uninstall` | Manage the auto-start service |
+</details>
 
-### Job Options
+<details>
+<summary>Job options (<code>boo add</code> / <code>boo edit</code>)</summary>
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--name` | Job name (must be unique) | required |
-| `--cron` / `--at` / `--every` | Schedule (exactly one required) | required |
-| `--prompt` | Prompt text sent to the runner's CLI via stdin | required (unless `--command`) |
+| `--name` | Job name (unique) | required |
+| `--cron` / `--at` / `--every` | Schedule (exactly one) | required |
+| `--prompt` | Prompt piped to the runner via stdin | required (unless `--command`) |
 | `--command` | Raw shell command (implies `--runner shell`) | — |
-| `--runner` | Runner: `kiro` (default), `claude`, `codex`, `shell` | `kiro` |
+| `--runner` | `kiro` (default), `claude`, `codex`, `shell` | `kiro` |
 | `--dir` | Working directory for the job | `~/.boo/workspace/<name>` |
 | `--agent` | Agent to use (kiro runner only) | default agent |
 | `--model` | Model override, passed to the runner's CLI | runner default |
-| `--timezone` | IANA timezone for cron/at evaluation (e.g. `America/New_York`) | UTC |
-| `--timeout` | Max seconds before killing the job | 300 |
-| `--retry` | Max retry attempts on failure | 0 |
-| `--retry-delay` | Seconds between retries | 60 |
-| `--delete-after-run` | Auto-delete job after success | false |
-| `--open-artifact` | File/glob to open on notification click (relative to dir) | `.response` file |
-| `--notify-start` | Send notification when job starts | false |
-| `--trust-all-tools` | Pass `--trust-all-tools` to kiro-cli | false |
+| `--timezone` | IANA timezone for cron/at (e.g. `America/New_York`) | UTC |
+| `--timeout` | Seconds before the job is killed | 300 |
+| `--retry` / `--retry-delay` | Retry attempts / seconds between them | 0 / 60 |
+| `--delete-after-run` | Auto-delete after a successful run | false |
+| `--open-artifact` | File/glob to open on notification click | `.response` |
+| `--notify-start` | Notify when the job begins | false |
+| `--trust-all-tools` | Grant all tools to the agent | false |
 | `--trust-tools` | Trust only these tools (comma-separated) | — |
-| `--allow-overlap` | Allow a new run to start while a prior one is still running | false |
-| `--allow-url-trigger` | Allow `boo://run` / `boo://resume` links to fire this job | false |
-| `--description` | Human-readable description of what this job does | — |
-
-### Cron Expressions
-
-Standard 5-field cron syntax: `minute hour day-of-month month day-of-week`
-
-```
-* * * * *        Every minute
-0 9 * * *        Daily at 9:00 AM (UTC unless --timezone is set)
-0 9 * * 1-5      Weekdays at 9:00 AM
-*/30 * * * *     Every 30 minutes
-0 8,17 * * *     At 8:00 AM and 5:00 PM
-0 0 1 * *        First day of each month at midnight
-```
-
-Use `boo next "<cron>"` to preview when a cron expression will fire.
-
-## How It Works
-
-### Heartbeat Pattern
-
-The daemon runs a timer loop (default every 60 seconds). On each tick:
-
-1. Load all enabled jobs
-2. For each job, check if overdue based on schedule type
-3. If overdue, spawn kiro-cli with the prompt piped via stdin
-4. Record the result and update `last_run`
-
-### Missed Schedule Recovery
-
-Job state is persisted to disk. When the system wakes from sleep, the next heartbeat detects overdue jobs and fires them. A job that fell behind fires once on catch-up, and cron jobs record how many scheduled occurrences were skipped in `missed_count` (an on-time run reports 0).
-
-### Retry on Failure
-
-Jobs with `--retry N` will retry up to N times with `--retry-delay` seconds between attempts. Each attempt is logged. Notifications indicate retry progress.
-
-### Notifications
-
-- **Start notification** (opt-in via `--notify-start`): sent when job begins
-- **Completion notification**: includes response preview, click to open artifact
-- **Failure notification**: includes exit code and retry status
-
-Notifications are delivered natively via the `user-notify` crate. On macOS, the daemon sends notifications directly from the main thread for reliable callback handling (click-to-open and inline reply).
-
-### Clickable Artifacts
-
-When a notification is clicked, it opens the `--open-artifact` file (relative to job's working directory) if the glob resolves to an existing file.
-
-Artifact patterns support globs (e.g. `daily-*.html`) — the newest matching file is resolved at notification time. This is useful when agents generate files with dynamic names like timestamps.
-
-### Inline Reply
-
-Notifications include a "Reply" action. Type a follow-up message and it opens an interactive `boo resume <job> "<text>"` session in your terminal (auto-detects iTerm, Ghostty, Alacritty, kitty, WezTerm, or Terminal.app — configurable via `terminal` in config.json).
-
-### Output Formats
-
-```bash
-boo list                  # Default table view
-boo list --format json    # JSON (pipe to jq)
-boo list --format csv     # CSV
-```
-
-### Session Resume
-
-Every job run creates a kiro-cli session. Resume any past session for follow-up:
-
-```bash
-boo resume good-morning                    # Resume latest session
-boo resume good-morning "follow up text"   # Resume with a prompt
-boo resume good-morning --previous         # Pick from previous sessions
-boo resume                                 # Resume in default workspace
-```
-
-### Shell Commands
-
-Not everything needs an AI agent. Use `--command` for raw shell jobs:
-
-```bash
-boo add --name "backup" --every "1d" --command "rsync -a ~/docs /backup/"
-boo add --name "cleanup" --cron "0 3 * * 0" --command "find /tmp -mtime +7 -delete"
-```
-
-### URL Scheme
-
-`boo install` registers the `boo://` URL scheme. Use deep links in HTML artifacts or bookmarks:
-
-```
-boo://resume/good-morning?prompt=tell%20me%20more    # Resume with prompt
-boo://run/catch-up-emails                             # Trigger a job
-boo://open/good-morning                               # Open latest artifact
-```
-
-> **Security:** `boo://run` and `boo://resume` execute a job (or inject a prompt into its agent session), and any web page can open such a link. For that reason they are **opt-in per job**: a job only responds to these links if it was created or edited with `--allow-url-trigger true`. Otherwise the link is rejected with a message telling you how to enable it. `boo://open` (which only opens an artifact) is not gated.
-
-On macOS, a small Swift helper (BooURL.app) is compiled at install time to handle URL events. Requires Xcode Command Line Tools.
-
-### Editing Jobs
-
-Modify any setting on an existing job without remove/re-add:
-
-```bash
-boo edit my-job --timeout 600 --retry 5
-boo edit my-job --cron "0 8 * * 1-5"     # Change schedule
-boo edit my-job --description "Daily standup prep"
-```
-
-### Removing Jobs
-
-```bash
-boo remove my-job                # prompts: "Delete logs too? [y/N]"
-boo remove my-job --delete-logs  # deletes job + all logs
-boo remove my-job --keep-logs    # deletes job, keeps logs
-```
-
-### Security
-
-- Prompts are piped via **stdin**, not passed as CLI arguments (not visible in `ps aux`)
-- `BOO_NON_INTERACTIVE=1` env var is set on all spawned kiro-cli processes so agents can detect daemon context
-- `BOO_JOB_NAME` env var is set to the job name so agents know which job they're running as
-- Output files are stored in `~/.boo/runs/` with standard file permissions
-
-## Output Files
-
-Each run produces two files in `~/.boo/runs/<job-id>/`:
-
-| File | Contents |
-|------|----------|
-| `<timestamp>.log` | Full kiro-cli output (stdout + stderr) |
-| `<timestamp>.response` | Clean response only (ANSI stripped) |
+| `--allow-overlap` | Start a run while a prior one is still going | false |
+| `--allow-url-trigger` | Let `boo://run` / `boo://resume` fire this job | false |
+| `--description` | Human-readable description | — |
+</details>
 
 ## Configuration
 
-Optional config at `~/.boo/config.json`:
+Optional `~/.boo/config.json`:
 
 ```json
 {
-  "kiro_cli_path": "/usr/local/bin/kiro-cli",
+  "kiro_cli_path": "kiro-cli",
   "claude_cli_path": "claude",
   "codex_cli_path": "codex",
   "default_timeout_secs": 300,
@@ -296,58 +177,63 @@ Optional config at `~/.boo/config.json`:
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `kiro_cli_path` | Path to the kiro-cli binary (`kiro` runner) | `kiro-cli` (from PATH) |
-| `claude_cli_path` | Path to the Claude Code binary (`claude` runner) | `claude` (from PATH) |
-| `codex_cli_path` | Path to the Codex binary (`codex` runner) | `codex` (from PATH) |
+| `kiro_cli_path` / `claude_cli_path` / `codex_cli_path` | Binary for each runner | CLI name on `PATH` |
 | `default_timeout_secs` | Default job timeout | 300 |
-| `max_log_runs` | Max log files kept per job | 50 |
+| `max_log_runs` | Log files kept per job | 50 |
 | `heartbeat_secs` | Daemon tick interval | 60 |
-| `terminal` | Preferred terminal for resume/new-window | auto-detect |
-| `notify_webhook` | URL POSTed a JSON body on job lifecycle events (`http`/`https`, TLS supported) | — |
+| `terminal` | Preferred terminal for resume / new-window | auto-detect |
+| `notify_webhook` | URL POSTed a JSON body on `job.started` / `job.completed` / `job.failed` (`http`/`https`, TLS) | — |
 
-> **File permissions:** On Unix, `~/.boo` is created `0700` and `jobs.json`, `config.json`, and run logs/transcripts are written `0600`, since they can contain prompts, webhook URLs, and agent output. `notify_webhook` receives `job.started` / `job.completed` / `job.failed` events and is delivered over TLS for `https://` URLs; delivery failures are logged, not silently dropped.
+---
 
-## Cross-Platform Support
+## How it works
 
-| Platform | Auto-start | Restart on Crash |
-|----------|-----------|-----------------|
+The daemon runs a heartbeat loop (default 60s). Each tick loads enabled jobs, checks each against its schedule, and for any that are overdue spawns the runner with the prompt on stdin, records the result, and updates `last_run`. Because all state is persisted, a missed window (sleep, reboot) is simply detected and caught up on the next tick.
+
+## Platform support
+
+| Platform | Auto-start | Restart on crash |
+|----------|-----------|------------------|
 | macOS | launchd (`~/Library/LaunchAgents/`) | `KeepAlive` |
 | Linux | systemd user service (crontab fallback) | `Restart=always` |
-| Windows | Task Scheduler (logon task) | Manual |
+| Windows | Task Scheduler (logon task) | manual |
 
-## File Layout
+On macOS the daemon sends notifications from the main thread (CFRunLoop) so click-to-open and inline reply work reliably. `boo://` deep links are handled by a small Swift helper compiled at install time (requires Xcode Command Line Tools).
+
+## Output & storage
+
+Each run writes to `~/.boo/runs/<job-id>/`: a `<timestamp>.log` (full stdout+stderr) and a `<timestamp>.response` (clean, ANSI-stripped stdout).
 
 ```
 ~/.boo/
-├── config.json          # Global settings
-├── jobs.json            # Job definitions (atomic writes, file-locked)
-├── jobs.lock            # Advisory lock for concurrent CLI + daemon access
-├── daemon.pid           # Running daemon PID
-├── daemon.lock          # Prevents duplicate daemon instances
-├── workspace/
-│   └── <job-name>/      # Per-job working directory (kiro-cli sessions isolated here)
+├── config.json          # global settings
+├── jobs.json            # job definitions (atomic, file-locked)
+├── daemon.pid / .lock   # daemon state / single-instance guard
+├── workspace/<name>/    # per-job working directory
 └── runs/
-    ├── <job-id>.jsonl   # Run metadata (timestamp, duration, success, missed count)
-    └── <job-id>/
-        ├── 20260219_160820_855.log        # Full output
-        └── 20260219_160820_855.response   # Clean response
+    ├── <job-id>.jsonl   # run metadata (time, duration, success, missed count)
+    └── <job-id>/…       # per-run .log and .response files
 ```
+
+## Security
+
+- Prompts are piped via **stdin**, never passed as CLI arguments (not visible in `ps aux`).
+- On Unix, `~/.boo` is created `0700` and `jobs.json` / `config.json` / run logs are `0600` — they can hold prompts, webhook URLs, and agent output.
+- `boo://run` / `boo://resume` are opt-in per job (`--allow-url-trigger`); webhook deliveries use TLS for `https://` URLs and log failures instead of dropping them.
+- Spawned runners get `BOO_NON_INTERACTIVE=1` and `BOO_JOB_NAME` so agents can detect the daemon context and which job they are.
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Development
 
 ```bash
-cargo test              # unit, property-based, and CLI integration tests
-cargo clippy            # Zero warnings
-cargo build --release   # ~3.5MB binary
+cargo test     # unit, property-based, and CLI integration tests
+cargo clippy --all-targets -- -D warnings
+cargo build --release
 ```
 
-See [AGENTS.md](AGENTS.md) for architecture details and contributor guidance.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for build/test/lint expectations and
-[AGENTS.md](AGENTS.md) for architecture. Security issues: [SECURITY.md](SECURITY.md).
+Architecture and design decisions live in [AGENTS.md](AGENTS.md); contribution guidelines in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Licensed under the [MIT License](LICENSE).
+[MIT](LICENSE)
