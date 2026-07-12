@@ -56,6 +56,8 @@ enum Commands {
         model: Option<String>,
         #[arg(long)]
         timeout: Option<u64>,
+        /// IANA timezone for cron/at evaluation (e.g. "America/New_York").
+        /// Defaults to UTC.
         #[arg(long)]
         timezone: Option<String>,
         /// Auto-delete job after successful execution
@@ -883,8 +885,11 @@ async fn cmd_add(
         Some(every_str) => Some(parse_duration(every_str)?),
         None => None,
     };
+    if let Some(ref tz) = timezone {
+        cron_eval::parse_timezone(tz)?;
+    }
     if let Some(ref cron_str) = cron {
-        cron_eval::next_occurrence(cron_str, Utc::now())?;
+        cron_eval::next_occurrence_tz(cron_str, Utc::now(), timezone.as_deref())?;
     }
 
     if create_default_workspace {
@@ -1073,6 +1078,7 @@ async fn cmd_edit(
         changes.push(format!("timeout → {v}s"));
     }
     if let Some(v) = timezone {
+        cron_eval::parse_timezone(&v)?;
         job.timezone = Some(v.clone());
         changes.push(format!("timezone → {v}"));
     }

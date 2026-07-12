@@ -271,7 +271,7 @@ impl<C: Clock + 'static> Scheduler<C> {
         } else if let Some(every_secs) = job.every_secs {
             cron_eval::missed_count_every(every_secs, from_time, now)
         } else {
-            cron_eval::missed_count(&job.cron_expr, from_time, now)
+            cron_eval::missed_count(&job.cron_expr, from_time, now, job.timezone.as_deref())
         };
 
         // Log directory

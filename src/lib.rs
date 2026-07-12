@@ -41,7 +41,7 @@ pub fn strip_ansi(s: &str) -> String {
                 // CSI sequence: ESC [ ... <final alpha byte>
                 Some(&'[') => {
                     chars.next();
-                    while let Some(nc) = chars.next() {
+                    for nc in chars.by_ref() {
                         if nc.is_ascii_alphabetic() {
                             break;
                         }
