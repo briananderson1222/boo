@@ -54,6 +54,7 @@ git diff "$base_ref"...HEAD > "$diff_file" 2>/dev/null || git diff "$base_ref" H
 # interpolated directly into a single command-line argument.
 kiro-cli chat \
   --no-interactive \
+  --agent-engine v3 \
   --trust-tools=read,grep \
   --agent "$agent" \
   "Run a ${review_kind} for this diff. The full unified diff has been written to the file at ${diff_file}. Use your read tool to read that file before evaluating; it is not included inline here. Return concise markdown findings.
