@@ -36,7 +36,19 @@ fn strip_ansi(s: &[u8]) -> String {
 /// `--at` parsing are still kiro-cli specific (see `main.rs`).
 pub trait Runner: Send + Sync {
     fn build_command(&self, job: &Job, config: &Config) -> Command;
-    fn stdin_bytes(&self, job: &Job) -> Option<Vec<u8>>;
+
+    /// Bytes to pipe to the child's stdin. Defaults to the job prompt — how
+    /// every agent runner feeds it. `ShellRunner` overrides this to `None`.
+    fn stdin_bytes(&self, job: &Job) -> Option<Vec<u8>> {
+        Some(job.prompt.as_bytes().to_vec())
+    }
+}
+
+/// Set the working directory and boo-context env vars that every runner needs.
+fn apply_job_env(cmd: &mut Command, job: &Job) {
+    cmd.current_dir(&job.working_dir);
+    cmd.env("BOO_NON_INTERACTIVE", "1");
+    cmd.env("BOO_JOB_NAME", &job.name);
 }
 
 /// Runs prompts via kiro-cli.
@@ -58,14 +70,8 @@ impl Runner for KiroRunner {
         if let Some(ref model) = job.model {
             cmd.args(["--model", model]);
         }
-        cmd.current_dir(&job.working_dir);
-        cmd.env("BOO_NON_INTERACTIVE", "1");
-        cmd.env("BOO_JOB_NAME", &job.name);
+        apply_job_env(&mut cmd, job);
         cmd
-    }
-
-    fn stdin_bytes(&self, job: &Job) -> Option<Vec<u8>> {
-        Some(job.prompt.as_bytes().to_vec())
     }
 }
 
@@ -94,14 +100,8 @@ impl Runner for ClaudeCodeRunner {
             cmd.arg("--allowedTools");
             cmd.args(tools.split([',', ' ']).filter(|s| !s.is_empty()));
         }
-        cmd.current_dir(&job.working_dir);
-        cmd.env("BOO_NON_INTERACTIVE", "1");
-        cmd.env("BOO_JOB_NAME", &job.name);
+        apply_job_env(&mut cmd, job);
         cmd
-    }
-
-    fn stdin_bytes(&self, job: &Job) -> Option<Vec<u8>> {
-        Some(job.prompt.as_bytes().to_vec())
     }
 }
 
@@ -128,14 +128,8 @@ impl Runner for CodexRunner {
         }
         // "-" makes codex read the prompt from stdin.
         cmd.arg("-");
-        cmd.current_dir(&job.working_dir);
-        cmd.env("BOO_NON_INTERACTIVE", "1");
-        cmd.env("BOO_JOB_NAME", &job.name);
+        apply_job_env(&mut cmd, job);
         cmd
-    }
-
-    fn stdin_bytes(&self, job: &Job) -> Option<Vec<u8>> {
-        Some(job.prompt.as_bytes().to_vec())
     }
 }
 
@@ -157,9 +151,7 @@ impl Runner for ShellRunner {
             cmd.args(["-c", shell_cmd]);
         }
 
-        cmd.current_dir(&job.working_dir);
-        cmd.env("BOO_NON_INTERACTIVE", "1");
-        cmd.env("BOO_JOB_NAME", &job.name);
+        apply_job_env(&mut cmd, job);
         cmd
     }
 
