@@ -17,3 +17,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test
       - run: cargo clippy -- -D warnings
+
+  kiro-review-scripts-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/test-review-scripts.sh
