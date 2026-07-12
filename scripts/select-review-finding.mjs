@@ -34,6 +34,20 @@ if (!finding) {
   process.exit(1);
 }
 
+if (
+  !finding ||
+  typeof finding !== "object" ||
+  typeof finding.description !== "string" ||
+  !finding.description.trim() ||
+  typeof finding.file !== "string" ||
+  !finding.file.trim() ||
+  typeof finding.severity !== "string" ||
+  !finding.severity.trim()
+) {
+  console.error(`Finding #${number} is missing required fields (description, file, severity).`);
+  process.exit(2);
+}
+
 const shortDescription = finding.description.slice(0, 80);
 const location = finding.line ? `${finding.file}#L${finding.line}` : finding.file;
 

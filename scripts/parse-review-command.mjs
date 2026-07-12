@@ -7,7 +7,16 @@ if (!command) {
   process.exit(2);
 }
 
-const body = bodyArg === "--file" ? fs.readFileSync(filePath, "utf8") : bodyArg;
+let body = bodyArg;
+if (bodyArg === "--file") {
+  try {
+    body = fs.readFileSync(filePath, "utf8");
+  } catch (error) {
+    console.error(`Unable to read comment body file: ${error.message}`);
+    process.exit(2);
+  }
+}
+
 const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const match = body.match(new RegExp(`^${escaped}\\s+(\\d+)\\s*$`));
 
