@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-07-12
+
+Multi-harness support, a Kiro CI review suite, and a quality/security pass on top of the 0.6.0 audit hardening. First tagged release since v0.5.1.
+
+### Features
+- **Multiple runners.** `--runner` selects the harness that executes a job: `kiro` (default), `claude` (Claude Code `claude -p`), `codex` (`codex exec`), or `shell`. Generic job fields (`--model`, `--trust-all-tools`, `--trust-tools`) map onto each CLI's flags; per-runner binary paths in config (`kiro_cli_path` / `claude_cli_path` / `codex_cli_path`).
+- **Interactive parity.** Foreground `boo run --interactive`, `boo resume`, and natural-language `--at` parsing work for every runner (kiro `--resume`, claude `--continue`, codex `resume --last`). Only `--new-window` and `boo://resume` remain kiro-specific.
+
+### CI recipes (opt-in)
+- Kiro-powered PR review, security gate, docs-drift, and test-gap workflows plus an opt-in `/kiro-fix` auto-fix-branch recipe, driven by a reusable workflow and trusted-checkout pattern. Agents run under the Kiro v3 engine (`--agent-engine v3`), are model-less (use the account default), and are defined as Markdown-with-frontmatter. Helper scripts are single-language Node.
+
+### Security
+- Sensitive files (`jobs.json`, `config.json`) are created `0600` at open (no write-then-chmod window). The macOS URL-handler Swift source now escapes the binary path. CI kiro-cli install downloads + logs a sha256 instead of blind `curl | bash`.
+
+### Tests & quality
+- Coverage added for `installer.rs` content generators, `notifier.rs` payload/formatting, the runners, daemon seams, and the review helper scripts. Runners de-duplicated behind a shared env helper and a default `stdin_bytes`.
+
+### Docs & project
+- README restructured (value/quick-start first, internals last). Added `LICENSE` (MIT), `CONTRIBUTING`, `CODE_OF_CONDUCT`, `SECURITY`, issue/PR templates, `CODEOWNERS`, full `Cargo.toml` publish metadata, and Dependabot.
+
+### Known issues
+- `quick-xml` RUSTSEC advisories persist transitively via `user-notify 0.4.2` (latest still pins `quick-xml 0.37`); clearing them requires replacing the desktop-notification crate.
+
 ## [0.6.0] - 2026-07-12
 
 Audit-driven hardening pass across correctness, security, dependencies, and docs.

@@ -14,6 +14,8 @@ Inspired by [OpenClaw's heartbeat technique](https://zenvanriel.nl/ai-engineer-b
 
 ## Install
 
+Download a prebuilt binary for macOS, Linux, or Windows from the [latest release](https://github.com/briananderson1222/boo/releases/latest), or build from source:
+
 ```bash
 cargo build --release
 cp target/release/boo /usr/local/bin/
