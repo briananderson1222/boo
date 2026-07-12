@@ -1423,6 +1423,35 @@ fn interactive_command(
             }
             c
         }
+        Some("pi") => {
+            let mut c = std::process::Command::new(&config.pi_cli_path);
+            match resume {
+                Some(false) => {
+                    c.arg("--continue");
+                }
+                Some(true) => {
+                    c.arg("--resume");
+                }
+                None => {}
+            }
+            if let Some(p) = prompt {
+                c.arg(p);
+            }
+            c
+        }
+        Some("opencode") => {
+            let mut c = std::process::Command::new(&config.opencode_cli_path);
+            // opencode's interactive form is `run -i`; --continue resumes the
+            // last session (there is no separate picker).
+            c.args(["run", "-i"]);
+            if resume.is_some() {
+                c.arg("--continue");
+            }
+            if let Some(p) = prompt {
+                c.arg(p);
+            }
+            c
+        }
         // kiro (default)
         _ => {
             let mut c = std::process::Command::new(&config.kiro_cli_path);
@@ -2076,6 +2105,19 @@ async fn parse_at_time(input: &str, runner: Option<&str>) -> boo::error::Result<
                 prompt.clone(),
             ],
         ),
+        Some("pi") => (
+            &config.pi_cli_path,
+            vec![
+                "--print".into(),
+                "--mode".into(),
+                "text".into(),
+                prompt.clone(),
+            ],
+        ),
+        Some("opencode") => (
+            &config.opencode_cli_path,
+            vec!["run".into(), prompt.clone()],
+        ),
         _ => (
             &config.kiro_cli_path,
             vec![
@@ -2266,5 +2308,52 @@ mod tests {
             None,
         ));
         assert_eq!(a, vec!["hey".to_string()]);
+    }
+
+    #[test]
+    fn interactive_pi_and_opencode() {
+        let cfg = Config::default();
+        let dir = Path::new("/tmp/x");
+        // pi: --continue for resume, --resume for picker
+        let (p, a) = parts(&interactive_command(
+            Some("pi"),
+            &cfg,
+            dir,
+            None,
+            Some("go"),
+            Some(false),
+        ));
+        assert!(p.contains("pi"));
+        assert!(a.contains(&"--continue".to_string()) && a.contains(&"go".to_string()));
+        let (_p, a) = parts(&interactive_command(
+            Some("pi"),
+            &cfg,
+            dir,
+            None,
+            None,
+            Some(true),
+        ));
+        assert!(a.contains(&"--resume".to_string()));
+        // opencode: `run -i`, --continue on resume
+        let (p, a) = parts(&interactive_command(
+            Some("opencode"),
+            &cfg,
+            dir,
+            None,
+            None,
+            Some(false),
+        ));
+        assert!(p.contains("opencode"));
+        assert_eq!(&a[..2], &["run".to_string(), "-i".to_string()]);
+        assert!(a.contains(&"--continue".to_string()));
+        let (_p, a) = parts(&interactive_command(
+            Some("opencode"),
+            &cfg,
+            dir,
+            None,
+            None,
+            None,
+        ));
+        assert_eq!(a, vec!["run".to_string(), "-i".to_string()]);
     }
 }

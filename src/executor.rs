@@ -28,12 +28,9 @@ fn strip_ansi(s: &[u8]) -> String {
 /// This is the seam that makes boo harness-neutral. Each runner maps boo's
 /// generic job fields — `prompt`, `model`, `trust_all_tools`/`trust_tools`,
 /// `agent` — onto that CLI's own flags. Adding a new agent CLI is: implement
-/// this trait, register it in [`get_runner`], and add its name to
-/// [`VALID_RUNNERS`].
-///
-/// Note: this covers the scheduled/batch execution path only. Interactive
-/// resume (`boo run --interactive`, `boo://resume`) and natural-language
-/// `--at` parsing are still kiro-cli specific (see `main.rs`).
+/// this trait, register it in [`get_runner`], add its name to
+/// [`VALID_RUNNERS`], and add a `<name>_cli_path` config field. Interactive
+/// resume and natural-language `--at` are handled runner-aware in `main.rs`.
 pub trait Runner: Send + Sync {
     fn build_command(&self, job: &Job, config: &Config) -> Command;
 
@@ -133,6 +130,62 @@ impl Runner for CodexRunner {
     }
 }
 
+/// Runs prompts via the pi coding-agent CLI (`pi -p`, print mode).
+///
+/// Field mapping: `model` → `--model`; `trust_tools` → `--tools` (allowlist).
+/// `trust_all_tools` needs no flag — print mode already runs tools without
+/// confirmation. `agent` has no pi equivalent and is ignored. The prompt is
+/// piped via stdin.
+pub struct PiRunner;
+
+impl Runner for PiRunner {
+    fn build_command(&self, job: &Job, config: &Config) -> Command {
+        let mut cmd = Command::new(&config.pi_cli_path);
+        cmd.args(["--print", "--mode", "text"]);
+        if let Some(ref model) = job.model {
+            cmd.args(["--model", model]);
+        }
+        if let Some(ref tools) = job.trust_tools {
+            cmd.args(["--tools", tools]);
+        }
+        apply_job_env(&mut cmd, job);
+        cmd
+    }
+}
+
+/// Runs prompts via the opencode CLI (`opencode run`, non-interactive).
+///
+/// Field mapping: `model` → `-m` (opencode's `provider/model` form);
+/// `agent` → `--agent`; `trust_all_tools` → `--auto` (auto-approve
+/// permissions), otherwise opencode's default permission behavior applies;
+/// `trust_tools` has no opencode CLI equivalent and is ignored. opencode `run`
+/// takes the prompt as a positional message (so it is visible in `ps`, unlike
+/// the stdin-piping runners).
+pub struct OpencodeRunner;
+
+impl Runner for OpencodeRunner {
+    fn build_command(&self, job: &Job, config: &Config) -> Command {
+        let mut cmd = Command::new(&config.opencode_cli_path);
+        cmd.arg("run");
+        if let Some(ref model) = job.model {
+            cmd.args(["-m", model]);
+        }
+        if let Some(ref agent) = job.agent {
+            cmd.args(["--agent", agent]);
+        }
+        if job.trust_all_tools {
+            cmd.arg("--auto");
+        }
+        cmd.arg(&job.prompt);
+        apply_job_env(&mut cmd, job);
+        cmd
+    }
+
+    fn stdin_bytes(&self, _job: &Job) -> Option<Vec<u8>> {
+        None
+    }
+}
+
 /// Runs raw shell commands.
 pub struct ShellRunner;
 
@@ -162,7 +215,7 @@ impl Runner for ShellRunner {
 
 /// Known runner names. A `None`/unset runner defaults to kiro (or shell when a
 /// raw command is set).
-pub const VALID_RUNNERS: &[&str] = &["kiro", "claude", "codex", "shell"];
+pub const VALID_RUNNERS: &[&str] = &["kiro", "claude", "codex", "pi", "opencode", "shell"];
 
 /// Validate a `--runner` value, so a typo like "shel" is rejected at add/edit
 /// time instead of silently falling back to the kiro runner.
@@ -183,6 +236,8 @@ pub fn get_runner(job: &Job) -> Box<dyn Runner> {
         Some("shell") => Box::new(ShellRunner),
         Some("claude") => Box::new(ClaudeCodeRunner),
         Some("codex") => Box::new(CodexRunner),
+        Some("pi") => Box::new(PiRunner),
+        Some("opencode") => Box::new(OpencodeRunner),
         Some("kiro") => Box::new(KiroRunner),
         // No runner set: a raw --command implies shell, otherwise kiro.
         _ if job.command.is_some() => Box::new(ShellRunner),
@@ -471,11 +526,63 @@ mod tests {
 
     #[test]
     fn test_new_runners_validate() {
-        assert!(validate_runner("claude").is_ok());
-        assert!(validate_runner("codex").is_ok());
-        assert!(validate_runner("kiro").is_ok());
-        assert!(validate_runner("shell").is_ok());
+        for r in ["kiro", "claude", "codex", "pi", "opencode", "shell"] {
+            assert!(validate_runner(r).is_ok(), "{r} should be valid");
+        }
         assert!(validate_runner("gemini").is_err());
+    }
+
+    #[test]
+    fn test_pi_runner_command_shape() {
+        let mut job = test_job();
+        job.runner = Some("pi".into());
+        job.model = Some("anthropic/claude".into());
+        job.trust_tools = Some("read,bash".into());
+        let runner = get_runner(&job);
+        let (prog, args) = cmd_parts(&runner.build_command(&job, &test_config()));
+        assert!(prog.ends_with("echo")); // stubbed pi_cli_path
+        assert!(args.contains(&"--print".to_string()));
+        assert_eq!(
+            args.iter()
+                .position(|a| a == "--model")
+                .map(|i| &args[i + 1]),
+            Some(&"anthropic/claude".to_string())
+        );
+        assert_eq!(
+            args.iter()
+                .position(|a| a == "--tools")
+                .map(|i| &args[i + 1]),
+            Some(&"read,bash".to_string())
+        );
+        // pi reads the prompt from stdin
+        assert!(runner.stdin_bytes(&job).is_some());
+    }
+
+    #[test]
+    fn test_opencode_runner_command_shape() {
+        let mut job = test_job();
+        job.runner = Some("opencode".into());
+        job.model = Some("anthropic/claude-sonnet".into());
+        job.agent = Some("build".into());
+        job.trust_all_tools = true;
+        let runner = get_runner(&job);
+        let (prog, args) = cmd_parts(&runner.build_command(&job, &test_config()));
+        assert!(prog.ends_with("echo")); // stubbed opencode_cli_path
+        assert_eq!(args.first().map(String::as_str), Some("run"));
+        assert_eq!(
+            args.iter().position(|a| a == "-m").map(|i| &args[i + 1]),
+            Some(&"anthropic/claude-sonnet".to_string())
+        );
+        assert_eq!(
+            args.iter()
+                .position(|a| a == "--agent")
+                .map(|i| &args[i + 1]),
+            Some(&"build".to_string())
+        );
+        assert!(args.contains(&"--auto".to_string()));
+        // prompt is a positional message, not stdin
+        assert!(args.contains(&job.prompt));
+        assert!(runner.stdin_bytes(&job).is_none());
     }
 
     #[tokio::test]
