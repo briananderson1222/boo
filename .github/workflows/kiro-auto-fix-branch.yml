@@ -15,7 +15,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout trusted workflow code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Keep scripts and agent config out of PR control. The PR branch is
           # checked out separately under workspace/ after command validation.
@@ -61,7 +61,7 @@ jobs:
           node trusted/scripts/select-review-finding.mjs review-findings.json "$FINDING_NUM" > selected-finding.json
 
       - name: Checkout pull request branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           path: workspace
